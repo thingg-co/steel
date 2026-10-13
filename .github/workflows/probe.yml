@@ -1,0 +1,36 @@
+name: venue probe
+
+# Every night: does every venue still answer the way Steel's sources, readers and order
+# clients expect? A failure here means a contract moved, not that the code regressed.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      STEEL_DEVICE: cpu
+      STEEL_NEWS: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv sync --dev
+      - name: Probe every venue
+        run: |
+          uv run steel probe --json > probe.json || echo "PROBE_FAILED=1" >> "$GITHUB_ENV"
+          uv run python -c "import json; from steel import probe; print(probe.fmt(json.load(open('probe.json'))))"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: probe-${{ github.run_id }}
+          path: probe.json
+      - name: Fail on a critical venue
+        if: env.PROBE_FAILED == '1'
+        run: |
+          echo "a default-on source or a trade venue broke; see the report above"
+          exit 1

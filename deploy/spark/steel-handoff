@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# The GPU handoff from the peer's side. Flint's start script can call
+#     steel-handoff shared     before its autotune (Steel pauses background training, empties
+#                              its CUDA cache and keeps its memory floor until Flint is seen running)
+#     steel-handoff auto       after Flint has stopped (Steel goes solo on its own within a minute anyway)
+# Steel also watches for flint-run itself and reads Flint's timer schedule, so this is belt and
+# braces for a start outside the schedule. Needs Steel's operator token: it is read from the
+# vault by `steel handoff`, so run it as the user that runs Steel.
+set -euo pipefail
+cd "$HOME/Development/steel"
+exec .venv/bin/python -m steel handoff "${1:-auto}" ${2:-}

@@ -1,0 +1,394 @@
+"""First-run machine benchmark and model auto-sizing.
+
+Picks the compute device (CUDA > MPS > CPU), benchmarks a ladder of model sizes on
+it, and chooses the biggest whose training step is fast enough to keep up with the
+bar interval. The result is cached to <state_dir>/machine.json so it only benchmarks
+once per machine — this is what lets the app adapt when shared to different hardware.
+"""
+from __future__ import annotations
+
+import contextlib
+import fcntl
+import json
+import logging
+import os
+import sys
+import time
+from pathlib import Path
+
+import torch
+
+from .model import SteelNet, steel_loss
+
+log = logging.getLogger(__name__)
+
+# name, d_model, dilations, n_experts, n_heads, window
+PRESETS = [
+    ("S",    64,  (1, 2, 4, 8, 16),          3, 4, 64),
+    ("M",    96,  (1, 2, 4, 8, 16, 32),      5, 6, 96),
+    ("L",    128, (1, 2, 4, 8, 16, 32),      6, 8, 96),
+    ("XL",   192, (1, 2, 4, 8, 16, 32),      8, 8, 128),
+    ("XXL",  256, (1, 2, 4, 8, 16, 32),      8, 8, 128),
+    ("XXXL", 384, (1, 2, 4, 8, 16, 32, 64),  8, 8, 128),
+    ("4XL",  512, (1, 2, 4, 8, 16, 32, 64),  8, 8, 128),    # GPU-class presets: a Mac never reaches these
+    ("5XL",  768, (1, 2, 4, 8, 16, 32, 64), 12, 12, 128),
+]
+
+MEMORY_HEADROOM_GB = 3.0     # left for the OS, the feeds and the dashboard, on top of what the model needs
+LADDER_SAFETY = 1.35         # margin on the next rung's estimated peak before it is benchmarked
+
+
+def rung_need(last_peak_gb: float, last_d_model: int | None, d_model: int) -> float:
+    """Memory the next rung needs free before it is benchmarked: the previous rung's measured
+    peak scaled by width (a training peak grows about linearly with d_model: 2026-10-10 at 232
+    names, 384 -> 25 GB, 512 -> 34, 768 -> 51) with a margin, plus the headroom. A flat x3 here
+    refused 4XL at 362 names with 106 GB free when it needed about 53."""
+    if not last_d_model or last_peak_gb <= 0:
+        return 1.0 + MEMORY_HEADROOM_GB
+    return last_peak_gb * (d_model / float(last_d_model)) * LADDER_SAFETY + MEMORY_HEADROOM_GB
+
+
+class NotEnoughMemory(RuntimeError):
+    """The box cannot hold the model at its tuned size right now; starting anyway would push a
+    unified-memory machine into the OOM killer (the Spark hung this way on 2026-09-04 with an
+    84 GB llama-server loaded next to the 5XL benchmark)."""
+
+
+def free_memory_gb(device: str) -> float | None:
+    """Memory the model could still take, in GB, or None when the platform gives no answer.
+    Linux reports MemAvailable, which is the truth on unified memory (CUDA's own free figure there
+    counts page cache as used: 0.9 GB "free" on the Spark with 34 GB available). A discrete GPU
+    is its own pool, so there CUDA's figure is the one that matters."""
+    host = None
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    host = int(line.split()[1]) / 1e6
+                    break
+    except (OSError, ValueError):
+        pass
+    if device == "cuda":
+        try:
+            free, total = torch.cuda.mem_get_info()
+            unified = host is not None and abs(total / 1e9 - _host_total_gb()) < 0.15 * total / 1e9
+            if not unified:
+                return free / 1e9
+        except Exception:  # noqa: BLE001
+            pass
+    if host is None and sys.platform == "darwin":       # no /proc on a Mac: total minus what MPS holds, minus 8 GB for everything else
+        try:
+            import subprocess
+            out = subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True, timeout=2).stdout
+            total = int(out.strip()) / 1e9
+            held = torch.mps.driver_allocated_memory() / 1e9 if device == "mps" else 0.0
+            host = max(0.0, total - held - 8.0)
+        except Exception:  # noqa: BLE001
+            pass
+    return host
+
+
+def _host_total_gb() -> float:
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    return int(line.split()[1]) / 1e6
+    except (OSError, ValueError):
+        pass
+    return 0.0
+
+
+def other_gpu_tenants() -> list[str]:
+    """Names of systemd services that share the accelerator with Steel (llama-server@<model> and
+    Flint's flint-run on the Spark), so a memory refusal can say what to stop. Both system and
+    user units are listed: Flint runs as a user unit."""
+    try:
+        import subprocess
+        names: list[str] = []
+        for scope in ((), ("--user",)):
+            out = subprocess.run(["systemctl", *scope, "list-units", "--type=service", "--state=active",
+                                  "llama-server@*", "flint-run.service", "--no-legend", "--plain"],
+                                 capture_output=True, text=True, timeout=3).stdout
+            names += [ln.split()[0] for ln in out.splitlines() if ln.strip()]
+        return names
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _memory_message(need_gb: float, free_gb: float, what: str) -> str:
+    msg = (f"not enough memory to {what}: needs about {need_gb:.0f} GB free, {free_gb:.0f} GB available. "
+           f"Refusing to start rather than push the machine into the OOM killer.")
+    tenants = other_gpu_tenants()
+    if tenants:
+        msg += f" Running on the same memory: {', '.join(tenants)} -- stop it first (systemctl --user stop {tenants[0]} or sudo systemctl stop {tenants[0]})."
+    return msg
+
+
+class PeakMemory:
+    """Track peak memory allocation across devices.
+
+    On CUDA, uses torch.cuda's built-in peak tracking.
+    On MPS, samples repeatedly and tracks the maximum since reset.
+    On CPU, is a no-op (returns 0).
+    """
+
+    def __init__(self, device: str):
+        self.device = device
+        self.peak = 0.0
+        self.reset()
+
+    def reset(self) -> None:
+        """Reset peak tracking. On CUDA, this resets the internal stats."""
+        self.peak = 0.0
+        self.base = 0.0
+        if self.device == "cuda":
+            torch.cuda.reset_peak_memory_stats()
+            self.base = float(torch.cuda.memory_allocated())   # what the process already holds (a live model, a
+                                                               # backtest) is not this benchmark's peak
+
+    def sample(self) -> None:
+        """Sample current memory usage and update peak.
+
+        On MPS, we must sample repeatedly because driver_allocated_memory()
+        returns the current allocation, not the peak.
+        """
+        if self.device == "mps":
+            current = torch.mps.driver_allocated_memory() / 1e9
+            self.peak = max(self.peak, current)
+        # On CUDA, we read max_memory_allocated() directly in gb()
+        # On CPU, there's nothing to track
+
+    def gb(self) -> float:
+        """Return peak memory in GB."""
+        if self.device == "cuda":
+            return max(0.0, torch.cuda.max_memory_allocated() - self.base) / 1e9
+        if self.device == "mps":
+            return self.peak
+        return 0.0
+
+
+def pick_device(pref: str = "auto") -> str:
+    if pref and pref != "auto":
+        return pref
+    if torch.cuda.is_available():
+        return "cuda"
+    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def configure_backend(device: str) -> None:
+    """One-time precision/kernel settings. On CUDA: TF32 matmuls and cuDNN autotuning; the
+    training step then runs the forward/backward under bf16 autocast (see `autocast`). fp32
+    everywhere else. Idempotent."""
+    if device == "cuda":
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        torch.backends.cudnn.benchmark = True
+        torch.set_float32_matmul_precision("high")
+
+
+def autocast(device: str):
+    """bf16 mixed precision on CUDA; a no-op context elsewhere (MPS bf16 is still patchy)."""
+    if device == "cuda":
+        return torch.autocast("cuda", dtype=torch.bfloat16)
+    return contextlib.nullcontext()
+
+
+def _sync(device: str) -> None:
+    if device == "cuda":
+        torch.cuda.synchronize()
+    elif device == "mps":
+        torch.mps.synchronize()
+
+
+def _bench(device: str, preset, n_assets: int, n_features: int, batch: int, n_quant: int, iters: int = 6):
+    _, d, dil, exp, heads, win = preset
+    configure_backend(device)
+    dev = torch.device(device)
+    quant = tuple((i + 1) / (n_quant + 1) for i in range(n_quant))
+    m = SteelNet(n_features, n_assets, n_quant, d_model=d, dilations=dil, n_experts=exp, n_heads=heads).to(dev)
+    opt = torch.optim.AdamW(m.parameters(), 1e-3)
+    x = torch.randn(batch, n_assets, win, n_features, device=dev)
+    y = torch.randn(batch, n_assets, device=dev)
+    pk = PeakMemory(device)
+
+    def step():
+        with autocast(device):
+            q, up, down, g, _ = m(x)
+        loss, _ = steel_loss(q.float(), up.float(), down.float(), g.float(), y, quant)
+        opt.zero_grad(set_to_none=True)
+        loss.backward()
+        opt.step()
+        pk.sample()
+    step(); step()
+    _sync(device)
+    t = time.time()
+    for _ in range(iters):
+        step()
+    _sync(device)
+    ms = (time.time() - t) / iters * 1000
+    n = sum(p.numel() for p in m.parameters())
+    peak = pk.gb()
+    del m, opt, x, y
+    if device == "mps":
+        torch.mps.empty_cache()
+    elif device == "cuda":
+        torch.cuda.empty_cache()
+    return ms, n, peak
+
+
+def _best_threads(device: str, n_assets: int, n_features: int, n_quant: int, say) -> int:
+    cores = os.cpu_count() or 4
+    if device != "cpu":
+        return max(2, min(8, cores // 2))     # GPU does the math; CPU threads sample the replay and build features
+    best_ms, best_th = 1e9, 2
+    for th in sorted({2, cores // 2, max(2, int(cores * 0.6)), cores - 2}):
+        if th < 1:
+            continue
+        torch.set_num_threads(th)
+        ms, _, _ = _bench("cpu", PRESETS[1], n_assets, n_features, 16, n_quant, iters=4)
+        say(f"thread sweep: {th} threads -> {ms:.0f} ms/step")
+        if ms < best_ms:
+            best_ms, best_th = ms, th
+    return best_th
+
+
+def replay_gb_for(cfg, n_features: int) -> float:
+    """The replay's size in GB: the budget when one is set, else replay_size bars at the
+    per-bar cost (a feature row plus the label, mask and flags per name)."""
+    gb = float(getattr(cfg, "replay_gb", 0) or 0)
+    if gb > 0:
+        return gb
+    per = (cfg.replay_bytes_per_bar(n_features) if hasattr(cfg, "replay_bytes_per_bar")
+           else max(1, int(cfg.n_assets)) * (int(n_features) * 4 + 10) + 40)
+    return float(getattr(cfg, "replay_size", 0) or 0) * per / 1e9
+
+
+def _check_start_memory(cfg, n_features: int, choice: dict, say) -> None:
+    """Refuse to build the chosen preset when the box cannot hold it: the benchmark's peak plus the replay
+    buffer (float32 windows, allocated up front) plus headroom, against what is free right now."""
+    peak = float(choice.get("peak_gb") or 0.0)
+    if peak <= 0:
+        return
+    replay = replay_gb_for(cfg, n_features)
+    need = peak * 1.25 + replay + MEMORY_HEADROOM_GB
+    free = free_memory_gb(choice["device"])
+    say(f"memory: model peak {peak:.1f} GB + replay {replay:.1f} GB -> needs ~{need:.0f} GB, "
+        f"{'unknown' if free is None else f'{free:.0f} GB'} free")
+    if free is not None and free < need:
+        raise NotEnoughMemory(_memory_message(need, free, f"start preset {choice['preset']}"))
+
+
+def autotune(cfg, n_features: int, say=None) -> dict:
+    say = say or (lambda *a, **k: log.info(*a))
+    device = pick_device(cfg.device)
+    configure_backend(device)
+    cache = Path(cfg.state_dir) / "machine.json"
+    key = (f"{device}|bf16|mem|{os.cpu_count()}|{cfg.n_assets}|{n_features}|{cfg.bar_seconds}|{cfg.batch_size}"
+           f"|{cfg.autotune_util}|{cfg.max_warmup_seconds}|{cfg.warmup_steps}")
+    try:
+        c = json.loads(cache.read_text())
+        if c.get("key") == key:
+            ch = c["choice"]
+            say(f"using cached tuning: {ch['preset']} ({ch['params'] / 1e6:.2f}M params) on {ch['device']} "
+                f"at {ch['ms_per_step']} ms/step")
+            _check_start_memory(cfg, n_features, ch, say)
+            return ch
+    except (OSError, ValueError, KeyError):
+        pass
+
+    # Serialize benchmarking across processes -- two benchmarks on one GPU thrash memory into swap.
+    lock_f = None
+    try:
+        Path(cfg.state_dir).mkdir(parents=True, exist_ok=True)
+        lock_f = open(Path(cfg.state_dir) / "autotune.lock", "w")
+        try:
+            fcntl.flock(lock_f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            say("another benchmark is running; waiting for it to finish (one benchmark at a time)...")
+            fcntl.flock(lock_f, fcntl.LOCK_EX)
+    except OSError:
+        lock_f = None
+    try:
+        try:                                    # a concurrent run may have just tuned this exact config
+            c = json.loads(cache.read_text())
+            if c.get("key") == key:
+                ch = c["choice"]
+                say(f"using tuning from a concurrent run: {ch['preset']} ({ch['params'] / 1e6:.2f}M params)")
+                return ch
+        except (OSError, ValueError, KeyError):
+            pass
+
+        threads = _best_threads(device, cfg.n_assets, n_features, cfg.n_quantiles, say)
+        torch.set_num_threads(threads)
+        steps_per_bar = max(1, cfg.steps_per_label) + 1
+        cadence = cfg.bar_seconds * 1000.0 * cfg.autotune_util / steps_per_bar        # must keep up with online training
+        warmup_ceiling = cfg.max_warmup_seconds * 1000.0 / max(1, cfg.warmup_steps)   # keep go-live warmup bearable
+        budget = min(cadence, warmup_ceiling)
+        say(f"device {device} ({threads} cpu threads); step budget {budget:.0f} ms "
+            f"(min of {cadence:.0f} ms training cadence, {warmup_ceiling:.0f} ms warmup ceiling "
+            f"= {cfg.max_warmup_seconds:.0f}s over {cfg.warmup_steps} steps)")
+
+        tenants = other_gpu_tenants()
+        if tenants:
+            say(f"note: {', '.join(tenants)} is loaded on the same memory; the ladder stops where it runs out")
+        chosen, chosen_ms, chosen_n, chosen_peak = PRESETS[0], None, None, 0.0
+        last_peak, last_d, last_ms = 0.0, None, None
+        total = _host_total_gb()
+        for preset in PRESETS:
+            need = rung_need(last_peak, last_d, preset[1])
+            if last_d and last_ms and last_ms * (preset[1] / last_d) > budget * 1.3:
+                say(f"{preset[0]} would take about {last_ms * preset[1] / last_d:.0f} ms/step, well over the "
+                    f"{budget:.0f} ms budget; the ladder stops here")   # a rung that cannot be chosen is not worth its benchmark
+                break
+            replay_gb = replay_gb_for(cfg, n_features)
+            if total and need > total - replay_gb - MEMORY_HEADROOM_GB:
+                # Not transient: this box cannot hold that rung next to the replay at any time, so the
+                # ladder stops and the cache stays honest. A rung that would fit an empty box but not
+                # the box as it is right now is the transient case below, which refuses instead.
+                say(f"{preset[0]} needs about {need:.0f} GB next to a {replay_gb:.0f} GB replay and this box has "
+                    f"{total:.0f} GB; the ladder stops here")
+                break
+            free = free_memory_gb(device)
+            if free is not None and free < need:
+                # A ladder cut short by memory is a transient condition, not this machine's speed: caching a
+                # smaller preset here would silently downgrade the model for good. Refuse instead.
+                raise NotEnoughMemory(_memory_message(need, free, f"benchmark preset {preset[0]}"))
+            try:
+                ms, n, peak = _bench(device, preset, cfg.n_assets, n_features, cfg.batch_size, cfg.n_quantiles)
+            except Exception as e:  # noqa: BLE001
+                say(f"preset {preset[0]} failed ({type(e).__name__}); stopping ladder")
+                break
+            last_peak, last_d, last_ms = peak, preset[1], ms
+            say(f"benchmark {preset[0]:4}: {n / 1e6:5.2f}M params  {ms:5.0f} ms/step  {peak:4.1f} GB peak" +
+                ("  <- fits" if ms <= budget else "  (over budget)"))
+            if ms <= budget:
+                chosen, chosen_ms, chosen_n, chosen_peak = preset, ms, n, peak
+                if ms > budget * 0.85:        # near the ceiling: the next preset is bigger and will be over --
+                    say(f"{preset[0]} is near budget; skipping larger presets")   # skip it (a thrashing over-budget benchmark can take minutes + spike swap)
+                    break
+            else:
+                break
+        name, d, dil, exp, heads, win = chosen
+        if chosen_ms is None:
+            chosen_ms, chosen_n, chosen_peak = _bench(device, chosen, cfg.n_assets, n_features, cfg.batch_size, cfg.n_quantiles)
+        choice = {"device": device, "threads": threads, "d_model": d, "dilations": list(dil), "n_experts": exp,
+                  "n_heads": heads, "window": win, "preset": name, "params": chosen_n,
+                  "ms_per_step": round(chosen_ms), "budget_ms": round(budget), "peak_gb": round(chosen_peak, 2)}
+        _check_start_memory(cfg, n_features, choice, say)
+        try:
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            cache.write_text(json.dumps({"key": key, "choice": choice}))
+        except OSError:
+            pass
+        say(f"selected {name}: {chosen_n / 1e6:.2f}M params on {device}, {round(chosen_ms)} ms/step")
+        return choice
+    finally:
+        if lock_f is not None:
+            try:
+                fcntl.flock(lock_f, fcntl.LOCK_UN)
+                lock_f.close()
+            except OSError:
+                pass

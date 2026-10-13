@@ -1,0 +1,16 @@
+[Unit]
+Description=Steel crypto market model (24/7)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/steel-start --foreground
+WorkingDirectory=%h/Development/steel
+Restart=on-failure
+RestartSec=30
+KillMode=mixed
+TimeoutStopSec=90
+
+[Install]
+WantedBy=default.target

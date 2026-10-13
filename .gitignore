@@ -1,0 +1,36 @@
+.venv/
+__pycache__/
+*.pyc
+state/
+.env
+
+# provider credentials (never commit)
+coinbase.json
+*-trade.json
+binance.json
+bybit.json
+okx.json
+bitget.json
+bitmex.json
+blofin.json
+hyperliquid.json
+apex.json
+kucoin.json
+gateio.json
+mexc.json
+htx.json
+cryptocom.json
+bitfinex.json
+gemini.json
+bitstamp.json
+krakenfutures.json
+dydx.json
+deribit.json
+aster.json
+kraken.json
+coingecko.json
+alerts.json
+backups/
+
+# macOS
+.DS_Store

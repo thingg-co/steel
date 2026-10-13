@@ -1,0 +1,8 @@
+Steel is licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE):
+free for personal, hobby, research, educational and other noncommercial use.
+Commercial use needs a separate license from the author.
+
+Steel is a research toy, not financial advice. Market data fetched at runtime is
+covered by the terms of whichever venue supplies it (Coinbase, Kraken, Binance,
+Bybit, OKX, CoinGecko, Deribit, and the rest); Python dependencies install from
+PyPI under their own licenses.

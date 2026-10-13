@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Steel: a continuously learning model for a market that never closes</title>
+<meta name="description" content="A whitepaper on Steel's design: Flint's online learner pointed at crypto. Twenty-one venues with failover, five-minute bars around the clock, calibrated return distributions at three horizons, a paper book that pays every real cost including on-chain transfers between venues, cross-venue dislocations measured honestly, and the gated road from paper to live.">
+<meta property="og:title" content="Steel: a continuously learning model for a market that never closes">
+<meta property="og:description" content="Design decisions, with reasons, for a self-hosted crypto market model that learns as its own forecasts resolve and pays every cost a real fill would.">
+<meta property="og:type" content="article">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚒</text></svg>">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
+<script src="theme.js"></script>
+<style>
+  :root{
+    --bg:#0a0b0d; --surface:#13151a; --surface2:#1a1d24; --border:#282c35;
+    --ink:#f2f4f7; --ink2:#c0c6d0; --muted:#858c99;
+    --blue:#3987e5; --green:#26a269; --red:#e0574b; --fire:#8fb8ff; --gold:#ffd479;
+    --hot:#141f33; --cool:#102a24; --shade:#343a46; --shade2:#262a33; --code-bg:#0c0d10;
+    color-scheme:dark;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --serif:"Source Serif 4",Georgia,"Times New Roman",serif;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+    --max:1080px; --col:72ch;
+  }
+  @media (prefers-color-scheme: light){
+    :root:not([data-theme="dark"]){
+      --bg:#f7f8fa; --surface:#ffffff; --surface2:#eef0f4; --border:#dde1e8;
+      --ink:#171a20; --ink2:#3b4150; --muted:#737a88;
+      --blue:#2563c4; --green:#1e8449; --red:#c23b30; --fire:#2b5fb8; --gold:#9a6b12;
+      --hot:#dfe9fb; --cool:#dcf1ea; --shade:#d3d7df; --shade2:#e4e7ee; --code-bg:#eef0f4;
+      color-scheme:light;
+    }
+  }
+  :root[data-theme="light"]{
+    --bg:#f7f8fa; --surface:#ffffff; --surface2:#eef0f4; --border:#dde1e8;
+    --ink:#171a20; --ink2:#3b4150; --muted:#737a88;
+    --blue:#2563c4; --green:#1e8449; --red:#c23b30; --fire:#2b5fb8; --gold:#9a6b12;
+    --hot:#dfe9fb; --cool:#dcf1ea; --shade:#d3d7df; --shade2:#e4e7ee; --code-bg:#eef0f4;
+    color-scheme:light;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink2);font-family:var(--serif);line-height:1.65;font-size:17.5px;-webkit-font-smoothing:antialiased}
+  a{color:var(--blue);text-decoration:none} a:hover{text-decoration:underline}
+  h1,h2,h3,h4{color:var(--ink);line-height:1.15;margin:0 0 .5em;font-family:var(--sans);letter-spacing:-.01em}
+  .wrap{max-width:var(--max);margin:0 auto;padding:0 24px}
+  header.nav{position:sticky;top:0;z-index:10;background:color-mix(in srgb,var(--bg) 84%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--border);font-family:var(--sans)}
+  .nav .wrap{display:flex;align-items:center;gap:18px;height:60px}
+  .brand{font-weight:700;font-size:19px;color:var(--ink);display:flex;align-items:center;gap:8px}
+  .brand a{color:var(--ink)}
+  .nav nav{margin-left:auto;display:flex;gap:22px;align-items:center;font-size:14px}
+  .nav nav a{color:var(--ink2)}
+  .nav .gh{border:1px solid var(--border);border-radius:8px;padding:7px 13px;color:var(--ink)}
+  .nav .gh:hover{border-color:var(--ink2);text-decoration:none}
+  .nav .tgl{border:1px solid var(--border);border-radius:8px;padding:5px 10px;background:transparent;color:var(--ink);font:inherit;font-size:15px;line-height:1;cursor:pointer}
+  @media(max-width:640px){.nav nav a.hide-sm{display:none}}
+  .paper{display:grid;grid-template-columns:220px minmax(0,1fr);gap:48px;padding:56px 0 80px}
+  @media(max-width:900px){.paper{grid-template-columns:minmax(0,1fr)}}
+  .toc{position:sticky;top:84px;align-self:start;font-family:var(--sans);font-size:13.5px;line-height:1.5}
+  .toc .t{font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--fire);font-family:var(--mono);margin-bottom:10px}
+  .toc a{display:block;color:var(--ink2);padding:3px 0}
+  .toc a.sub{padding-left:14px;color:var(--muted)}
+  .toc a:hover{color:var(--ink);text-decoration:none}
+  @media(max-width:900px){.toc{position:static;border:1px solid var(--border);border-radius:10px;padding:14px 16px;columns:2;column-gap:24px} .toc .t{column-span:all}}
+  article{max-width:none;min-width:0}
+  article > p, article > ul, article > ol, article > h1, article > h2, article > h3, .abstract, .callout, .eq, .byline{max-width:var(--col)}
+  article ol.refs{max-width:none}
+  .eyebrow{font-family:var(--mono);font-size:12.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--fire);margin-bottom:14px}
+  article h1{font-size:clamp(30px,4.2vw,44px);margin-bottom:.4em}
+  .byline{font-family:var(--sans);font-size:14px;color:var(--muted);margin:0 0 30px;line-height:1.6}
+  .abstract{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--fire);border-radius:8px;padding:18px 20px;margin:0 0 36px;font-size:16.5px}
+  .abstract b{color:var(--ink);font-family:var(--sans);font-size:13px;letter-spacing:.1em;text-transform:uppercase;display:block;margin-bottom:8px}
+  article h2{font-size:26px;margin-top:2.2em;padding-top:.6em;border-top:1px solid var(--border)}
+  article h3{font-size:19px;margin-top:1.6em}
+  article p{margin:0 0 1.05em}
+  article ul,article ol{padding-left:1.3em;margin:0 0 1.05em}
+  article li{margin-bottom:.4em}
+  .eq{font-family:var(--serif);font-style:italic;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin:14px 0 18px;overflow-x:auto;color:var(--ink);font-size:17px;white-space:nowrap}
+  .eq .n{float:right;font-style:normal;color:var(--muted);font-family:var(--mono);font-size:12.5px}
+  .eq sub,.eq sup{font-style:normal;font-size:.75em}
+  var{font-style:italic}
+  code{font-family:var(--mono);font-size:.85em;color:var(--ink);background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:1px 5px}
+  .table-wrap{overflow-x:auto;margin:16px 0 22px;border:1px solid var(--border);border-radius:10px;background:var(--surface)}
+  table{border-collapse:collapse;width:100%;font-family:var(--sans);font-size:13.5px;line-height:1.45}
+  caption{text-align:left;padding:10px 12px;color:var(--muted);font-size:12.5px;caption-side:top}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+  th{font-weight:600;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--ink2);background:var(--surface2);white-space:nowrap}
+  tbody tr:last-child td{border-bottom:0}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  td b{color:var(--ink);font-weight:600}
+  .callout{border:1px solid var(--border);border-left:3px solid var(--gold);border-radius:8px;padding:14px 18px;background:var(--surface);margin:18px 0 22px;font-size:16px}
+  .callout b{color:var(--ink)}
+  .fig{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 12px 12px;margin:20px 0 26px}
+  .fig .cap{font-family:var(--sans);font-size:14.5px;color:var(--muted);margin-top:12px;line-height:1.5;padding:0 4px}
+  .fig svg{display:block;width:100%;height:auto}
+  @media(max-width:800px){.fig{overflow-x:auto} .fig svg{min-width:640px} .fig .cap{min-width:0}}
+  .lbl{font-family:var(--sans);font-size:16px;fill:var(--ink2)}
+  .lbl.b{fill:var(--ink);font-weight:600}
+  .lbl.m{font-family:var(--mono);font-size:15px;fill:var(--muted)}
+  .bx{fill:var(--surface2);stroke:var(--border);stroke-width:1}
+  .bx.hot{fill:var(--hot);stroke:var(--fire)}
+  .bx.cool{fill:var(--cool);stroke:var(--green)}
+  .ar{fill:none;stroke:var(--muted);stroke-width:1.4;marker-end:url(#arr)}
+  .refs{font-family:var(--sans);font-size:14px;padding-left:1.6em}
+  .refs li{margin-bottom:8px;line-height:1.5}
+  sup.r{font-family:var(--sans);font-size:11px;color:var(--fire);line-height:0;margin-left:1px}
+  sup.r a{color:var(--fire)}
+  footer{border-top:1px solid var(--border);padding:30px 0;color:var(--muted);font-size:14px;font-family:var(--sans)}
+  footer .wrap{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+  footer .brand{font-size:16px}
+  footer .copy{margin-left:auto;color:var(--muted)}
+</style>
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <span class="brand"><span>⚒</span> <a href="whitepaper.html">Steel</a></span>
+    <nav>
+      <a class="hide-sm" href="../README.md">README</a>
+      <a class="hide-sm" href="https://github.com/thingg-co/flint/blob/main/docs/whitepaper.html">Flint's whitepaper</a>
+      <a class="gh" href="https://github.com/thingg-co/steel">GitHub ↗</a>
+      <button id="theme-toggle" class="tgl" type="button" aria-label="Switch theme">☀</button>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap paper">
+  <aside class="toc" aria-label="Contents">
+    <div class="t">Contents</div>
+    <a href="#abstract">Abstract</a>
+    <a href="#intro">1. What a market that never closes changes</a>
+    <a href="#data">2. Data</a>
+    <a class="sub" href="#venues">Venues and failover</a>
+    <a class="sub" href="#bars">Bars and features</a>
+    <a class="sub" href="#replay">The replay</a>
+    <a class="sub" href="#universe">The universe</a>
+    <a href="#model">3. Model</a>
+    <a href="#learning">4. Learning around the clock</a>
+    <a href="#calibration">5. Calibration and trust</a>
+    <a href="#policy">6. Policy and risk</a>
+    <a class="sub" href="#book">The paper book</a>
+    <a class="sub" href="#costs">Every cost a real fill pays</a>
+    <a class="sub" href="#transfers">Money between venues</a>
+    <a href="#cross">7. Cross-venue structure</a>
+    <a class="sub" href="#dislocations">Dislocations</a>
+    <a class="sub" href="#arb">The arbitrage replay</a>
+    <a href="#evaluation">8. Evaluation</a>
+    <a href="#live">9. From paper to live</a>
+    <a href="#system">10. System design</a>
+    <a href="#limits">11. Limitations</a>
+    <a href="#future">12. Future work</a>
+    <a href="#refs">References</a>
+    <a href="#appendix">Appendix</a>
+  </aside>
+
+  <article>
+    <div class="eyebrow">Whitepaper · version 0.1 · October 2026</div>
+    <h1>Steel: a continuously learning model for a market that never closes</h1>
+    <p class="byline">thingg, LLC · Source at <a href="https://github.com/thingg-co/steel">github.com/thingg-co/steel</a> · PolyForm Noncommercial<br>A companion to <a href="https://github.com/thingg-co/flint/blob/main/docs/whitepaper.html">Flint's whitepaper</a>, which this paper assumes and does not repeat. Steel is a research instrument, not investment advice.</p>
+
+    <div class="abstract" id="abstract"><b>Abstract</b>
+      Steel is Flint's design, a single self-hosted process that forecasts each name's one-hour return distribution on five-minute bars and trains online as the forecasts resolve, pointed at crypto. The model, the online learner, the calibration and the walk-forward backtest are the same code. This paper records what a market with no session, dozens of venues quoting the same asset, and derivatives in place of borrowing changes: a clock that turns over at 00:00 UTC rather than at a close; a registry of twenty-one venues with failover, quote classes and asset identity; a bar store that holds a year of history in a few gigabytes; three forecast horizons from one trunk; a paper book whose bearish view is an isolated-margin perpetual rather than a borrow, whose bullish view is a 1x perpetual on the venue whose fees allow an hour's edge, and which keeps cash and collateral on different venues and pays the fee and the wait of moving money between them; a monitor that measures every cross-venue dislocation and a replay that prices what the arbitrage rules would have captured after latency and inventory; and a gated road from paper to live money in which every switch defaults to off. The honest finding so far is on the arbitrage side: once bad quotes are excluded and on-chain inventory rebalancing is charged, small-size cross-venue arbitrage nets about nothing.
+    </div>
+
+    <h2 id="intro">1. What a market that never closes changes</h2>
+    <p>Flint's six principles stand: distributions rather than points, the clock as the only train/test split, one network for the cross-section, defined risk only, everything observable, and one machine that nothing leaves. Crypto adds a seventh, which this paper returns to repeatedly: <b>the simulation pays every cost a real action would</b>, including the costs that equities do not have. A paper book that skipped a withdrawal fee or a ten-minute settlement would flatter the policy on exactly the trades that fail in practice.</p>
+    <p>Five differences from equities drive the rest of the design.</p>
+    <ol>
+      <li><b>No session.</b> There is no close to train through, no overnight gap, no open to wait for. Budgets, limits and refreshes turn over at 00:00 UTC. A gap in the tape is never a holiday; it is an alarm.</li>
+      <li><b>Many venues, one asset.</b> The same coin trades on twenty exchanges with different quote currencies, fees, symbol spellings, and occasionally a different coin under the same ticker. The data layer has to merge, rank and disambiguate before anything is modeled.</li>
+      <li><b>Derivatives instead of borrowing.</b> There is no stock loan. A short is a perpetual future with isolated margin, which bounds its loss by construction and pays or receives funding every hour or eight. A long can be the same instrument at 1x, which matters because spot retail fees are an order of magnitude higher than perp fees.</li>
+      <li><b>Money moves on chains.</b> Capital on one venue is not capital on another until a withdrawal clears and a deposit confirms: minutes for a stablecoin on a fast rail, most of an hour for bitcoin on its own chain, with a fee each way.</li>
+      <li><b>The crowd is visible.</b> Funding, open interest, the long/short ratio and the basis are published per name by the venues themselves, which gives the policy a direct reading of positioning rather than a proxy.</li>
+    </ol>
+
+    <div class="fig">
+      <svg viewBox="0 0 740 374" role="img" aria-label="The bar loop: venues with failover, bars, features, SteelNet with three horizons, calibration, the policy and the two-venue paper book, with labels returning to the bar store and the learner, and the deep backfill paging history from several venues">
+        <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--muted)"/></marker></defs>
+        <rect class="bx cool" x="10" y="20" width="192" height="80" rx="8"/><text class="lbl b" x="106" y="46" text-anchor="middle">21 venues</text><text class="lbl m" x="106" y="68" text-anchor="middle">priority failover</text><text class="lbl m" x="106" y="86" text-anchor="middle">quote class, identity</text>
+        <rect class="bx" x="220" y="20" width="140" height="80" rx="8"/><text class="lbl b" x="290" y="46" text-anchor="middle">Bars</text><text class="lbl m" x="290" y="68" text-anchor="middle">5 min, 24/7</text><text class="lbl m" x="290" y="86" text-anchor="middle">real trades</text>
+        <rect class="bx" x="378" y="20" width="130" height="80" rx="8"/><text class="lbl b" x="443" y="46" text-anchor="middle">Features</text><text class="lbl m" x="443" y="68" text-anchor="middle">29 per name</text><text class="lbl m" x="443" y="86" text-anchor="middle">z-scored</text>
+        <rect class="bx hot" x="526" y="20" width="202" height="98" rx="8"/><text class="lbl b" x="627" y="46" text-anchor="middle">SteelNet</text><text class="lbl m" x="627" y="68" text-anchor="middle">quantiles at 1 h, 4 h, 24 h</text><text class="lbl m" x="627" y="86" text-anchor="middle">up/down, gate, attention</text><text class="lbl m" x="627" y="104" text-anchor="middle">128-bar window</text>
+        <path class="ar" d="M202 60H218"/>
+        <path class="ar" d="M360 60H376"/>
+        <path class="ar" d="M508 60H524"/>
+        <rect class="bx" x="579" y="158" width="151" height="80" rx="8"/><text class="lbl b" x="654.5" y="184" text-anchor="middle">Calibration</text><text class="lbl m" x="654.5" y="206" text-anchor="middle">band scale s</text><text class="lbl m" x="654.5" y="224" text-anchor="middle">temperature T</text>
+        <rect class="bx" x="307" y="158" width="254" height="80" rx="8"/><text class="lbl b" x="434" y="184" text-anchor="middle">Policy, then the book</text><text class="lbl m" x="434" y="206" text-anchor="middle">gates, vol target, clusters</text><text class="lbl m" x="434" y="224" text-anchor="middle">perps on two venues</text>
+        <rect class="bx hot" x="10" y="158" width="223" height="80" rx="8"/><text class="lbl b" x="121.5" y="184" text-anchor="middle">Online learner</text><text class="lbl m" x="121.5" y="206" text-anchor="middle">steps per label</text><text class="lbl m" x="121.5" y="224" text-anchor="middle">a budget per UTC day</text>
+        <path class="ar" d="M627 118V156"/>
+        <path class="ar" d="M579 198H563"/>
+        <path class="ar" d="M121.5 158V138H556V120"/>
+        <text class="lbl m" x="338.75" y="132" text-anchor="middle">weights</text>
+        <rect class="bx cool" x="10" y="280" width="244" height="80" rx="8"/><text class="lbl b" x="132" y="306" text-anchor="middle">Deep backfill, always on</text><text class="lbl m" x="132" y="328" text-anchor="middle">each name from the first</text><text class="lbl m" x="132" y="346" text-anchor="middle">venue that pages it</text>
+        <rect class="bx" x="272" y="280" width="192" height="80" rx="8"/><text class="lbl b" x="368" y="306" text-anchor="middle">Bar store</text><text class="lbl m" x="368" y="328" text-anchor="middle">one row per bar</text><text class="lbl m" x="368" y="346" text-anchor="middle">5% held out</text>
+        <path class="ar" d="M254 320H270"/>
+        <path class="ar" d="M434 238V278"/>
+        <text class="lbl m" x="446" y="264">labels at t + 12, 48, 288</text>
+        <path class="ar" d="M368 280V260H121.5V240"/>
+      </svg>
+      <div class="cap">Figure 1. The bar loop, which never pauses. Hot boxes run on the accelerator. The one-hour label is the policy's; the four-hour and one-day labels train the extra horizons and come from the closes the bar store already holds.</div>
+    </div>
+
+    <h2 id="data">2. Data</h2>
+    <h3 id="venues">Venues and failover</h3>
+    <p>Market data comes from a registry of twenty-one venues plus CoinGecko as a quote-only aggregate, each a module that maps canonical <code>BASE-USD</code> names to the venue's spelling, streams trades and quotes over its websocket, and serves five-minute candles. Each name is owned by the highest-priority enabled venue that lists it and is fresh; ownership fails over without operator action. Three venues are on out of the box (Coinbase, Kraken and Hyperliquid, the one perpetuals venue); the rest are present but off, because a box in a region a venue blocks, or one that wants two websockets rather than twenty, should start clean. Perpetuals venues rank below every spot venue for price, because a perp is a derivative that funding keeps near spot rather than spot itself.</p>
+    <p>Two rules were learned on the first all-venue run. <b>Quote class.</b> Every venue declares whether its dollar pairs are quoted in USD, USDT or USDC. A standby venue may refresh a name's bid and ask only when its quote matches the active venue's, because a USDT book sat ten basis points above Coinbase's last trade and the policy read that basis as the cost of a fill. <b>Identity.</b> A ticker is not an asset: the same three letters named two different coins on two venues, and the dislocation monitor reported a 300-basis-point arbitrage between them. Steel keeps CoinGecko's top thousand by symbol and the names venues publish, marks a symbol with several ranked coins as ambiguous, and lets such a name pair across venues, or be served at all, only from venues resolved to the same coin.</p>
+    <p>Bars are built only from real trades; a quote or heartbeat updates the last price and the spread but never forms a candle. The taker side comes from each venue's own convention, which differs enough to be worth a table in the source code: Coinbase reports the maker's side, Binance a flag that the buyer was the maker, most venues the taker directly. Stalls are alarms: with no closed market to excuse them, three bar intervals without a candle while prices tick means a trade stream died, and the dashboard and the alerts say so.</p>
+
+    <h3 id="bars">Bars and features</h3>
+    <p>Each name contributes 29 features per bar, standardized by a running mean and variance kept per name. Nine come from the bars; thirteen are exogenous signals joined from the signal loops and held between refreshes; seven are functions of the bar's timestamp, which matters in a market where the hour of day, the funding settlement clock and the CME session all shape the tape.</p>
+    <div class="table-wrap">
+      <table>
+        <caption>Table 1. The 29 features per name per bar. A feature-set change resets the net but keeps the replay: the feature names travel with the store, columns are mapped by name, new ones start at zero and calendar ones are recomputed from each bar's timestamp.</caption>
+        <thead><tr><th>Group</th><th>Feature</th><th>Definition</th></tr></thead>
+        <tbody>
+          <tr><td rowspan="2"><b>Bars</b></td><td><code>ret</code>, <code>range</code>, <code>logvol</code>, <code>imbalance</code>, <code>spread</code></td><td>log return, log high/low, log volume, (buy − sell) / volume from the taker side, bid-ask spread in bps</td></tr>
+          <tr><td><code>logtrades</code>, <code>closepos</code>, <code>mom</code>, <code>rvol</code></td><td>log trade count, close position within the bar, the sum and the standard deviation of the last 12 bar returns</td></tr>
+          <tr><td rowspan="2"><b>Attention</b></td><td><code>news_sent</code>, <code>news_attn</code></td><td>headline tone from a local FinBERT over the crypto desks, rendered in a headless browser, and the name's share of coverage</td></tr>
+          <tr><td><code>reddit_sent</code>, <code>reddit_attn</code></td><td>the same from Reddit crypto chatter</td></tr>
+          <tr><td rowspan="3"><b>Positioning</b></td><td><code>fng</code></td><td>the Fear &amp; Greed index</td></tr>
+          <tr><td><code>funding</code>, <code>oi_chg</code>, <code>longshort</code>, <code>basis</code></td><td>the perp funding rate, the change in open interest, the retail long/short ratio and the perp-spot basis, per name, from Bybit and Hyperliquid</td></tr>
+          <tr><td><code>dvol</code></td><td>Deribit's DVOL, the crypto volatility index</td></tr>
+          <tr><td><b>Market</b></td><td><code>btc_dom</code>, <code>breadth</code>, <code>stable_flow</code></td><td>bitcoin dominance, advancers' share across the 250-name radar, the change in stablecoin supply</td></tr>
+          <tr><td><b>Calendar</b></td><td><code>hour_sin</code>, <code>hour_cos</code>, <code>dow_sin</code>, <code>dow_cos</code>, <code>to_funding</code>, <code>cme_open</code>, <code>expiry</code></td><td>the hour and the day of week as angles, time to the next funding settlement, whether the CME session is open, the Friday options expiry</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 id="replay">The replay</h3>
+    <p>Flint's replay stored whole windows, which held two weeks of a few hundred names in thirty gigabytes. A market with no close produces 288 bars a day, every day, and the deep backfill reaches back months, so Steel stores one row per bar with its label, mask, timestamp and links to the bars before and after it, and gathers windows by index at batch time; a window is valid only over time-contiguous bars. Consecutive windows share all but one bar, so this holds sixty-four times the history for the same bytes: a year of four hundred names fits in under four gigabytes. The closes the store keeps also give the four-hour and one-day labels for free, so the extra horizons need no pending window of their own.</p>
+    <p>The rest is Flint's: rows keyed by bar time, so a restart's re-walk adds nothing; a universe change that keeps a retained name's column and masks a new one until the deep backfill fills it; every twentieth bar by timestamp held out of training for good as the one honest overfitting signal.</p>
+
+    <h3 id="universe">The universe</h3>
+    <p>There are far fewer liquid crypto pairs than liquid stocks, so there is no reason to curate a small set. In the default <code>liquid</code> mode the universe is a sixty-name core, every holding in the operator's accounts, and every dollar pair the enabled spot venues list whose 24-hour dollar volume clears a floor (one million dollars a day, about 120 Coinbase names today), under a hard cap of 512 that is a limit rather than a target. Each venue reports its listed pairs' volume; the most any venue reports counts. Stablecoins and the fiat pairs Coinbase lists as dollar products are never modeled. Flint's grace and tenure rules apply, so a thin day never churns the set: a demotion forfeits a learned row, and a quiet weekend is not worth that. The modeling floor is separate from the trading floor, which is twice as high.</p>
+
+    <h2 id="model">3. Model</h2>
+    <p>SteelNet is FlintNet with a horizon axis. The same trunk, dilated causal convolutions over the 128-bar window per name with a per-name embedding, cross-asset attention across names, and a regime gate over expert heads, feeds <var>H</var> quantile sets and tail pairs instead of one. The first horizon, twelve bars, is the policy's; the extras, 48 and 288 bars, are forecasts the dashboard shows beside it and the policy consults as a veto. The loss weighs each extra horizon at half the policy's:</p>
+    <div class="eq"><span class="n">(1)</span>L = Σ<sub>h</sub> w<sub>h</sub> · (1/|M<sub>h</sub>|) Σ<sub>i∈M<sub>h</sub></sub> [ Σ<sub>τ</sub> ρ<sub>τ</sub>(y<sub>i,h</sub> − q<sub>i,h,τ</sub>) + BCE(p<sub>i,h</sub><sup>up</sup>, 1[y<sub>i,h</sub> &gt; θ]) + BCE(p<sub>i,h</sub><sup>down</sup>, 1[y<sub>i,h</sub> &lt; −θ]) ]</div>
+    <p>with <var>w</var><sub>1</sub> = 1 and <var>w</var><sub>h</sub> = ½ for the extras. Why one trunk and not three models: the extra horizons are there to say whether the hour's call is a scalp into a trend, and a shared representation makes that comparison coherent rather than a disagreement between strangers. Only the first horizon is ever traded.</p>
+    <p>Sizing to the machine is Flint's ladder, with one addition forced by the reference box: Steel shares its GPU with Flint, which holds about fifty gigabytes on weekdays, so the ladder runs under a memory floor and the start refuses, naming the other tenant, when the chosen rung would not fit beside it. A CPU-only box picks a small net and runs the same code; the forecasts are noise at that width, but every loop, gate and ledger is exercised, which is how most of this system was built.</p>
+
+    <h2 id="learning">4. Learning around the clock</h2>
+    <p>Flint learns in four regimes separated by the session. Steel has no session, so the regimes are separated by budget and by who else wants the accelerator.</p>
+    <ul>
+      <li><b>Warmup.</b> A start pages thirty days of candles for the universe from the spot venues, perpetuals venues and the simulator filling only names left empty, and trains one pass over the labeled bars with the held-out check every forty steps, stopping when the held-out pinball stops improving or at a thirty-minute cap. Only then does it forecast.</li>
+      <li><b>Online.</b> Each bar whose forecasts have resolved yields a few steps on recency-biased batches, exactly as in Flint.</li>
+      <li><b>The background trainer.</b> Between bars, up to <code>train_epochs</code> passes over the replay per UTC day, in four-step chunks so a forecast waits one step at most, under the same held-out guard. The budget is bounded by data rather than hours, and resets at midnight UTC.</li>
+      <li><b>The deep backfill.</b> Always on: five-day chunks of history every 150 seconds, each name from the first enabled venue that pages by date range and lists it, with eight training steps per chunk off the event loop. Coinbase's public rate limit sets the cadence.</li>
+      <li><b>The GPU handoff.</b> When Flint is running, or will start within fifteen minutes of its timer, Steel is in <code>shared</code> mode: its base budget, its memory floor, the weekly backtest deferred, and in the lead-up the background trainer idle and the CUDA cache released so Flint's autotune measures a free GPU. When Flint is off, nights and weekends, <code>solo</code> mode triples the training budget and drops the floor. The model is not swapped between modes: a bigger preset would be a different net trained from scratch every night, and continuity is the point of online learning.</li>
+    </ul>
+
+    <h2 id="calibration">5. Calibration and trust</h2>
+    <p>Calibration is Flint's: an online conformal scale on the predicted band widths that starts wide and earns its way down as the 10–90 band's coverage approaches 80%, and a temperature on the direction logits that starts sceptical. Trust is where Steel differs, because a restart on a market that never closes should not mean hours without a book. The held-out slice of the replay over the last seven days is scored the way live labels are, by direction hit on the calls the policy would have made, and the model is trusted when at least 48 such calls hit at 50% or better; live labels take over as they mature. A scorecard that fails never revokes a trust the live record has earned. The per-name skill gate reads the same held-out calls on that name until live calls fill its record, then ages them out.</p>
+
+    <h2 id="policy">6. Policy and risk</h2>
+    <p>The policy is Flint's composition of auditable gates, each writing its reason into the name's card: the expected move against its uncertainty, the direction's margin over a coin flip, the edge net of every cost, the per-name record, the live spread, the daily dollar volume, the order's own impact by the square-root law and Amihud's illiquidity, the trend and the direction agreeing, and the same side persisting over several bars. Three gates are new.</p>
+    <ul>
+      <li><b>Horizon agreement.</b> A one-hour call whose four-hour median points the other way is held. A scalp into a trend is the commonest way a short-horizon model loses after costs.</li>
+      <li><b>Volatility targeting.</b> A position is sized to a daily volatility target over the name's realized daily volatility, floored at a quarter, so a meme coin and bitcoin carry about the same risk per slot and the book's risk does not swing with the tape.</li>
+      <li><b>Cluster caps.</b> No sector, by the market scan's categories, carries more than 40% gross, and the book's net bitcoin beta, the sum of weight times each name's loading from the relative target's fit, stays within 1.0. A crowded cluster's names are cut together, pro rata; the index hedges are exempt.</li>
+    </ul>
+    <p>The crowd overlay fades positioning that is visible here in a way it is not in equities: funding, the long/short ratio, the open-interest change and the basis per name, with Fear &amp; Greed and Reddit attention market-wide. A thin edge into extreme crowding is flipped, and the overlay says so.</p>
+
+    <h3 id="book">The paper book</h3>
+    <p>No position may carry unlimited risk. A bearish view is an isolated-margin perpetual short at 2x: the margin posted, notional over leverage and capped as a share of equity, is the most it can lose, because the venue liquidates it at entry × (1 + (1 − maintenance) / leverage) and the book settles that at exactly the margin. A bullish view is, by default, a 1x perpetual long on the perp venue, whose worst case is the stake, the same as spot; the alternative is spot on the spot venue. There is no naked borrow and no leverage on the book as a whole. Funding accrues on every open perp at the venue's current rate, pro rata per bar: a positive rate pays the shorts and charges the longs. The index hedge, an index short under a long basket and index spot over a bearish one, is Flint's.</p>
+
+    <h3 id="costs">Every cost a real fill pays</h3>
+    <p>Fees are the venue's, not a flat number. A profile per venue holds its taker and maker rates for spot and perpetuals, its funding interval and its maintenance margin; two settings say which venue each side would trade on; and once a day each configured venue's reader fetches the account's actual fee tier and the book charges that instead. The policy charges two taker legs of the venue a side trades on, the funding a perp would pay while the rate runs against it (never a credit for funding it would earn), the spread, the impact and the Amihud charge against the median before it trades; the book charges the same on its fills. The consequence is deliberate: a retail spot tier, forty basis points a side on Coinbase, never looks tradable at a one-hour horizon, so longs go to the perp venue where a leg costs under five.</p>
+
+    <h3 id="transfers">Money between venues</h3>
+    <p>The book keeps its cash on the spot venue and its collateral on the perp venue, split at the start. When a position needs more than its venue holds, the book sends the shortfall, as USDC on the cheapest rail in a table of withdrawal fees and settlement times per asset, charges the fee, and holds the money in flight for the rail's wait. The position does not open until the money lands, and only if the signal is still there when it does. A single venue for both classes is one pool and no transfers. The same table prices what the arbitrage executor refuses: a leg that would need a balance moved first is declined with the transfer's cost in basis points of the trade and its minutes, because a dislocation measured in seconds does not survive a ten-minute deposit.</p>
+    <div class="fig">
+      <svg viewBox="0 0 740 300" role="img" aria-label="The two-pool paper book: cash on the spot venue, collateral on the perp venue, a transfer in flight between them with a fee and a wait, and the position that waits for it">
+        <rect class="bx cool" x="10" y="20" width="300" height="90" rx="8"/><text class="lbl b" x="160" y="48" text-anchor="middle">Spot venue · cash</text><text class="lbl m" x="160" y="72" text-anchor="middle">spot longs (long_mode = spot)</text><text class="lbl m" x="160" y="92" text-anchor="middle">the index hedge's spot leg</text>
+        <rect class="bx hot" x="430" y="20" width="300" height="90" rx="8"/><text class="lbl b" x="580" y="48" text-anchor="middle">Perp venue · collateral</text><text class="lbl m" x="580" y="72" text-anchor="middle">perp longs at 1x, shorts at 2x</text><text class="lbl m" x="580" y="92" text-anchor="middle">isolated margin, funding</text>
+        <path class="ar" d="M310 65H428"/>
+        <text class="lbl m" x="369" y="56" text-anchor="middle">USDC on the cheapest rail</text>
+        <rect class="bx" x="200" y="150" width="340" height="60" rx="8"/><text class="lbl b" x="370" y="176" text-anchor="middle">In flight: amount − fee, lands at t + wait</text><text class="lbl m" x="370" y="198" text-anchor="middle">counted in equity, usable by neither venue</text>
+        <path class="ar" d="M369 110V148"/>
+        <rect class="bx" x="10" y="240" width="720" height="44" rx="8"/><text class="lbl m" x="370" y="267" text-anchor="middle">the position waits; the signal must still be there when the money lands (solana 5 min, base 8, ethereum 15, bitcoin 45)</text>
+      </svg>
+      <div class="cap">Figure 2. The two-pool book. The rail table holds typical 2026 fees and waits per asset and can be overridden per box; the cheapest honest rail is assumed, never Lightning unless the operator says both venues speak it.</div>
+    </div>
+
+    <h2 id="cross">7. Cross-venue structure</h2>
+    <h3 id="dislocations">Dislocations</h3>
+    <p>With twenty venues quoting the same names, the manager's book hook delivers every venue's top of book, active or standby, to a monitor that opens an episode when the best bid across venues stands above the best ask across venues net of both venues' taker fees and a latency allowance, within the same dollar (USD, USDT and USDC books sit a basis apart) and the same kind (spot against spot, perp against perp), and closes it when the gap is gone. The episode's window, its peak and mean net edge and the top-of-book sizes go to a log and to the dashboard. The monitor measures; it never executes. Cross-stablecoin and spot-against-perp gaps are deliberately not episodes: those are a basis to carry, not a round trip.</p>
+
+    <h3 id="arb">The arbitrage replay</h3>
+    <p>An executor exists, off unless switched on and execution is enabled, that sends both legs at once when an episode's net edge clears a minimum, both venues are armed, both legs are the same kind, and the readers' last balances can fund them, flattening a leg whose partner failed. Before anything like that runs with money, the question is what the rules would have captured, and the log answers it. A replay applies the executor's rules by latency rung, from 50 ms to 3 s: an episode counts only when it outlasted the round trip, at its mean net edge rather than its peak, at the smaller of the book's size and the order cap, after a cooldown per name; and because each capture moves base to the buy venue and cash to the sell venue, every two orders' worth of one-way flow on a pair is charged an on-chain rebalance of two stablecoin transfers. Episodes wider than 100 basis points are counted as data problems rather than trades.</p>
+    <div class="table-wrap">
+      <table>
+        <caption>Table 2. One day of the dislocation log on the development box, 2026-10-11: 140,935 episodes across 21 venues, replayed with a $200 order cap, a 5 bps minimum edge, a 60 s cooldown and inventory rebalanced every $400 of one-way flow.</caption>
+        <thead><tr><th class="num">Latency</th><th class="num">Captured</th><th class="num">Too fast</th><th class="num">Too thin</th><th class="num">Mean net bps</th><th class="num">Net USD</th><th class="num">Of which transfers</th></tr></thead>
+        <tbody>
+          <tr><td class="num">50 ms</td><td class="num">2,161</td><td class="num">34,360</td><td class="num">39,871</td><td class="num">19.4</td><td class="num">30.89</td><td class="num">−806.00</td></tr>
+          <tr><td class="num">300 ms</td><td class="num">1,974</td><td class="num">62,014</td><td class="num">22,610</td><td class="num">19.8</td><td class="num">6.76</td><td class="num">−775.00</td></tr>
+          <tr><td class="num">1 s</td><td class="num">1,631</td><td class="num">81,332</td><td class="num">10,860</td><td class="num">21.0</td><td class="num">17.56</td><td class="num">−667.00</td></tr>
+          <tr><td class="num">3 s</td><td class="num">1,040</td><td class="num">91,144</td><td class="num">4,762</td><td class="num">22.9</td><td class="num">36.12</td><td class="num">−440.00</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Three things in that table are the finding. First, 42,137 of the day's episodes were wider than 100 basis points, and one venue appeared on 40,986 of them; that is a quote mapping to check, not an opportunity. Second, the median episode lasted 171 milliseconds; a human, or a process on the other side of the internet from the venues, sees under half of them. Third, the gross edge is real but small, about twenty basis points on a $200 order, and the inventory it leaves behind costs more to move back on-chain than the captures earn. At this size the honest number is zero. Larger size raises the edge faster than the rebalancing cost, and inventory pre-positioned on both venues removes the transfers, which is what an arbitrage desk is.</p>
+
+    <h2 id="evaluation">8. Evaluation</h2>
+    <p>Live scoring is Flint's: every forecast is scored an hour after it is made on direction, band coverage and pinball loss, per name and in aggregate, and the paper book's record is the primary evidence. The held-out scorecard is the second, recomputed on demand over the last seven days and written to a daily scorecard the Research tab shows over time beside calibration by name and the drift of each standardized feature over the last day, which says when the normalizer or the tape has moved. The walk-forward backtest is Flint's too, with days that are UTC days and a Sharpe that annualizes over 365, run weekly in the thinnest tape, Saturday 00:00 UTC, when it owns the GPU and Flint is off; the policy sweep over its stored forecasts proposes gates without applying them. Whether the forecasts carry economic edge after the costs of Section 6 is the open question the backtest exists to answer.</p>
+
+    <h2 id="live">9. From paper to live</h2>
+    <p>Orders exist in one package, behind one gate, and every switch defaults to off. Execution must be enabled; a venue trades only when armed with a trade key of its own, separate from the read-only key; every cap (per order, per name, per venue, per day, exposure, leverage) must be set, because an unset cap is zero; the box clock must be within a second of the venues' server time; the kill switch, a flag, a button or a file, refuses everything; a reject starts a cooldown; and every request and answer goes to an audit log. Clients default to a dry run that signs and logs without sending. Balance readers are a separate package that can only read the endpoints each declares, and a test greps every path-like string in both packages for order, withdrawal and transfer words.</p>
+    <p>Promotion is a checklist the operator reads, never a rule the code applies: the model trusted, the weekend backtest scored over enough days with a positive net and an adequate hit rate, the paper book running for enough days with an adequate Sharpe, drawdown and return. The operator promotes from the dashboard; a failing checklist needs an explicit force. Once live, every paper fill becomes an order of a fraction of its notional through the client of the venue that side trades on, the book keeps what it expects to hold, reconciles it against the readers' positions on every poll, reports slippage against the paper price, and demotes itself at once on the kill switch, a drawdown past a limit or a drift past a tolerance. A stop cancels every open order; a panic button closes every position with reduce-only orders; a live book not heard from for half an hour comes back demoted. Alerts carry fills, calls, refusals, stalls, demotions and the kill switch to a phone. A dashboard token guards every change, a vault seals every key at rest, a daily backup holds everything that would hurt to lose, and a nightly probe checks every venue against the contract its code expects, so a moved endpoint is found by the probe rather than by an order.</p>
+    <div class="fig">
+      <svg viewBox="0 0 740 200" role="img" aria-label="The road from paper to live: paper book, the checklist, promotion by the operator, mirroring at a fraction of size, reconciliation, and the demotion triggers">
+        <rect class="bx" x="10" y="30" width="150" height="70" rx="8"/><text class="lbl b" x="85" y="58" text-anchor="middle">Paper book</text><text class="lbl m" x="85" y="80" text-anchor="middle">trusted model</text>
+        <rect class="bx" x="180" y="30" width="170" height="70" rx="8"/><text class="lbl b" x="265" y="58" text-anchor="middle">Checklist</text><text class="lbl m" x="265" y="80" text-anchor="middle">backtest + paper record</text>
+        <rect class="bx hot" x="370" y="30" width="170" height="70" rx="8"/><text class="lbl b" x="455" y="58" text-anchor="middle">Operator promotes</text><text class="lbl m" x="455" y="80" text-anchor="middle">armed venues, caps set</text>
+        <rect class="bx cool" x="560" y="30" width="170" height="70" rx="8"/><text class="lbl b" x="645" y="58" text-anchor="middle">Live, at 0.1x</text><text class="lbl m" x="645" y="80" text-anchor="middle">mirror, reconcile</text>
+        <path class="ar" d="M160 65H178"/><path class="ar" d="M350 65H368"/><path class="ar" d="M540 65H558"/>
+        <rect class="bx" x="10" y="130" width="720" height="50" rx="8"/><text class="lbl m" x="370" y="160" text-anchor="middle">demoted at once on: kill switch · drawdown past the limit · position drift · dead-man · the panic button</text>
+      </svg>
+      <div class="cap">Figure 3. The road from paper to live. Every arrow to the right is a deliberate act by a person; every arrow back is automatic.</div>
+    </div>
+
+    <h2 id="system">10. System design</h2>
+    <p>One process: an asyncio event loop that owns the bar clock, the feeds, the forecasts, the policy and the book, with training and the backtest off the loop in a worker thread, and a FastAPI server with a websocket that publishes every change to a no-build browser page. The periodic loops, signals, the market scan, the news, checkpoints, the deep backfill, the background trainer, the weekly backtest, the universe refresh, the account poll, the dislocation sweep, identity, alerts, the clock check, the fee tiers, the backup and the GPU handoff, are coroutines on the same loop. On the reference box Steel is an always-on systemd user service beside Flint's weekday timer, budgeted to fit beside it: a twelve-gigabyte replay, a twelve-gigabyte floor, and a start that refuses, naming the other tenant, when it would not fit. Every restart costs the warmup, so the design avoids restarts: keys, fee tiers, the universe, the venues' toggles and every policy knob change live.</p>
+
+    <h2 id="limits">11. Limitations</h2>
+    <ul>
+      <li>The forecasts' economic edge after the costs of Section 6 is unproven. On a CPU development box the net is too small to say anything; on the reference GPU the weekly backtest and the paper record are the evidence, and both are young.</li>
+      <li>The transfer table is typical values, not a feed. Venues change withdrawal fees and processing times; the override file is the remedy until a reader fetches them.</li>
+      <li>The paper book fills at the touch with the spread charged but without the square-root impact the policy gates on. At the book's size and the names it trades the difference is small; it is the one cost the fill does not pay.</li>
+      <li>Identity resolution covers the top thousand coins and the names Coinbase publishes. A collision below that rank, or on a venue that publishes no names, can still pair two different coins.</li>
+      <li>The dislocation log on the development box was gathered from one site. Latency to each venue, and therefore the share of episodes a real executor would see, depends on where the box sits.</li>
+      <li>Every reader and order client was exercised live with dummy credentials up to the venue's "invalid key" answer, which proves the request shape, not the response parsing, and nothing has been sent to a live matching engine.</li>
+    </ul>
+
+    <h2 id="future">12. Future work</h2>
+    <ol>
+      <li><b>Impact on the paper fill</b>, so the book pays what the policy already charges.</li>
+      <li><b>Withdrawal fees and times from the venues' own endpoints</b>, replacing the static rails.</li>
+      <li><b>Funding as a target.</b> The funding rate is forecastable and paid every hour or eight; a carry book that holds the basis with bounded risk is a second strategy the same data supports<sup class="r"><a href="#r3">3</a></sup>.</li>
+      <li><b>Meta-labeling</b> over the outcome records the book already keeps, sizing by the probability that acting on a call pays after costs<sup class="r"><a href="#r4">4</a></sup>.</li>
+      <li><b>Inventory pre-positioned for arbitrage</b>, which turns the replay's zero into a sizing question: at what size and with how much capital on each venue does the edge exceed the carry of the inventory.</li>
+    </ol>
+
+    <h2 id="refs">References</h2>
+    <ol class="refs">
+      <li id="r1">I. Makarov and A. Schoar, "Trading and Arbitrage in Cryptocurrency Markets," <i>Journal of Financial Economics</i> 135(2), 2020. <a href="https://www.sciencedirect.com/science/article/pii/S0304405X19301746">Article</a></li>
+      <li id="r2">I. Gibbs and E. Candès, "Adaptive Conformal Inference Under Distribution Shift," <i>NeurIPS</i>, 2021. <a href="https://arxiv.org/abs/2106.00170">arXiv</a></li>
+      <li id="r3">A. Schmeling, M. Schrimpf and K. Todorov, "Crypto Carry," BIS Working Paper 1087, 2023. <a href="https://www.bis.org/publ/work1087.htm">Paper</a></li>
+      <li id="r4">M. López de Prado, <i>Advances in Financial Machine Learning</i>, Wiley, 2018: triple-barrier labeling and meta-labeling.</li>
+      <li id="r5">Y. Amihud, "Illiquidity and Stock Returns: Cross-section and Time-series Effects," <i>Journal of Financial Markets</i> 5(1), 2002.</li>
+      <li id="r6">R. Almgren, C. Thum, E. Hauptmann and H. Li, "Direct Estimation of Equity Market Impact," <i>Risk</i>, 2005: the square-root law.</li>
+      <li id="r7">R. Koenker and G. Bassett, "Regression Quantiles," <i>Econometrica</i> 46(1), 1978: the pinball loss.</li>
+      <li id="r8">Flint: design of a continuously learning intraday market model, thingg, 2026. <a href="https://github.com/thingg-co/flint/blob/main/docs/whitepaper.html">Whitepaper</a></li>
+    </ol>
+
+    <h2 id="appendix">Appendix: principal settings</h2>
+    <div class="table-wrap">
+      <table>
+        <caption>Table 3. Defaults. Items marked live can be changed from the dashboard without a restart; every one can be set as <code>STEEL_&lt;NAME&gt;</code> in the environment.</caption>
+        <thead><tr><th>Setting</th><th>Default</th><th>Role</th></tr></thead>
+        <tbody>
+          <tr><td><code>bar_seconds</code> / <code>horizon</code> / <code>extra_horizons</code> / <code>window</code></td><td>300 / 12 / 48, 288 / 128</td><td>five-minute bars; one hour, four hours, a day; 128 bars of context</td></tr>
+          <tr><td><code>backfill_days</code> / <code>warmup_epochs</code> / <code>max_warmup_minutes</code></td><td>30 / 1 / 30</td><td>the start</td></tr>
+          <tr><td><code>train_epochs</code> (live) / <code>deep_backfill_days</code> (live) / <code>deep_chunk_days</code></td><td>per box / 180 on the Spark / 5</td><td>the background trainer's daily budget; history paged</td></tr>
+          <tr><td><code>replay_gb</code> / <code>replay_days</code></td><td>per box / 400</td><td>the bar store's budget and cap</td></tr>
+          <tr><td><code>universe_mode</code> / <code>model_dollar_volume</code> / <code>max_universe</code></td><td>liquid / 1e6 / 512</td><td>the universe</td></tr>
+          <tr><td><code>min_labels</code> / <code>min_hit_rate</code> (live) / <code>trust_days</code> / <code>skill_min_n</code> (live)</td><td>48 / 0.5 / 7 / 8</td><td>trust, and the per-name record</td></tr>
+          <tr><td><code>score_threshold</code> / <code>prob_margin</code> / <code>move_floor_bps</code> / <code>confirm_bars</code> (live)</td><td>0.35 / 0.06 / 8 / 2</td><td>the entry gates</td></tr>
+          <tr><td><code>horizon_agree</code> / <code>vol_target</code> / <code>max_cluster_weight</code> / <code>max_beta_exposure</code> (live)</td><td>on / 0.05 / 0.4 / 1.0</td><td>the longer view, sizing, clusters</td></tr>
+          <tr><td><code>long_mode</code> / <code>long_leverage</code> / <code>short_leverage</code> / <code>short_max_frac</code> (live)</td><td>perp / 1 / 2 / 0.05</td><td>how each side is held and bounded</td></tr>
+          <tr><td><code>trade_venue_spot</code> / <code>trade_venue_perp</code> / <code>spot_fee_bps</code> / <code>perp_fee_bps</code> (live)</td><td>coinbase / hyperliquid / 0 / 0</td><td>where a side trades; 0 takes the venue's real tier</td></tr>
+          <tr><td><code>paper_perp_cash_frac</code> / <code>transfer_asset</code> / <code>min_transfer_usd</code></td><td>0.5 / USDC / 250</td><td>the two pools and the rail money moves on</td></tr>
+          <tr><td><code>stop_loss_bps</code> / <code>max_hold_bars</code> / <code>daily_loss_limit</code> (live)</td><td>300 / 12 / 0.03</td><td>exits and the day's limit</td></tr>
+          <tr><td><code>dislocation_latency_bps</code> / <code>arb_min_edge_bps</code> / <code>arb_max_order_usd</code> / <code>arb_cooldown_s</code></td><td>per box / 5 / 200 / 60</td><td>the monitor and the executor's rules</td></tr>
+          <tr><td><code>execution</code> / <code>execution_dry_run</code> / <code>exec_max_*</code> / <code>clock_max_offset_s</code></td><td>off / on / 0 / 1.0</td><td>the gate: nothing executes until every cap is set</td></tr>
+          <tr><td><code>live_scale</code> / <code>live_max_drawdown</code> / <code>live_drift_tol</code> / <code>live_deadman_minutes</code></td><td>0.1 / 0.05 / 0.25 / 30</td><td>the live book and its demotion rules</td></tr>
+          <tr><td><code>auth</code> / <code>handoff_schedule</code> / <code>solo_train_multiplier</code> / <code>memory_floor_gb</code> (live)</td><td>mutate / Mon..Fri 19:45 / 3 / per box</td><td>the dashboard token; the GPU handoff with Flint</td></tr>
+          <tr><td><code>backtest_weekday</code> / <code>backtest_hour</code></td><td>Saturday / 00:00 UTC</td><td>the weekly run, in the thinnest tape</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="byline">Revision history: v0.1, October 11, 2026, first publication.</p>
+  </article>
+</div>
+
+<footer>
+  <div class="wrap">
+    <span class="brand"><span>⚒</span> Steel</span>
+    <span>a self-hosted crypto market model</span>
+    <span class="copy">© 2026 <a href="https://thingg.co">thingg, LLC</a> · PolyForm Noncommercial</span>
+  </div>
+</footer>
+</body>
+</html>

@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Start Steel on the Spark. Run by deploy/spark/steel.service (a plain always-on user service:
+# crypto never closes, so there is no timer) and by hand. This file is the launcher's source of
+# truth: install.sh copies it to ~/.local/bin/steel-start, and the STEEL_* environment for this
+# box lives here.
+#
+#   by hand:       steel-start            (detached, as the transient unit steel-run)
+#   follow logs:   journalctl --user -u steel -f        (or -u steel-run when started by hand)
+#   stop:          systemctl --user stop steel          (or steel-run)
+set -euo pipefail
+
+cd "$HOME/Development/steel"
+export PATH="$HOME/.local/bin:$PATH"
+
+if ss -ltn | grep -q ':8100 '; then
+    echo "Steel is already listening on :8100; not restarting (a restart resets the trusted count)."
+    exit 0
+fi
+if [[ ! -x .venv/bin/python ]]; then
+    echo "no .venv: run  uv sync  first" >&2
+    exit 1
+fi
+
+# The Spark's environment. Every knob in steel/config.py can go here as STEEL_<NAME>.
+#
+# Memory: Flint (flint-run, weekdays) holds about 50 GB of the 121 GB and its 30 GB replay; a
+# Steel 4XL at 60 names needs roughly 35 GB plus its replay. Both fit side by side only with the
+# budgets below, and `steel check` says so before a start; a start that would not fit refuses.
+ENV=(
+    STEEL_HOST=0.0.0.0                                 # reachable from the LAN
+    STEEL_PORT=8100                                    # Flint owns :8000
+    PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True   # one growable pool instead of per-shape blocks
+    STEEL_COMPILE=1                                    # torch.compile the train step: about 2x on the GB10
+    STEEL_MAX_WARMUP_SECONDS=240                       # tune budget 4000 ms/step: the ladder reaches 4XL at 60 names
+    STEEL_REPLAY_GB=12                                 # replay budget; the window count follows the universe
+    STEEL_MAX_UNIVERSE=512                             # liquid mode: every Coinbase/Kraken dollar pair above the modeling floor (about 120 today at $1M/day)
+    STEEL_MODEL_DOLLAR_VOLUME=1000000
+    STEEL_BACKFILL_DAYS=30                             # history before the first forecast; one pass over it, held-out guard, 30-minute cap
+    STEEL_WARMUP_EPOCHS=1
+    STEEL_MAX_WARMUP_MINUTES=30
+    STEEL_DEEP_BACKFILL_DAYS=180                       # page Coinbase history back this far (5-day chunks, every 150 s)
+    STEEL_MEMORY_FLOOR_GB=12                           # leave this much free for Flint's day
+    STEEL_BRIEF_BACKEND=openai                         # the brief, when enabled, talks to a LOCAL
+    STEEL_BRIEF_OPENAI_BASE=http://127.0.0.1:8080/v1   # llama-server on :8080 -- never a cloud API
+)
+
+if [[ "${1:-}" == "--foreground" ]]; then
+    # Under the steel.service unit: the service supervises the process itself.
+    exec env "${ENV[@]}" "$PWD/.venv/bin/python" -m steel
+fi
+
+if command -v systemd-run >/dev/null 2>&1 && systemctl --user is-system-running >/dev/null 2>&1; then
+    # A transient user unit of its own, so it outlives the shell that calls us and logs to the journal.
+    systemd-run --user --unit=steel-run --collect --quiet \
+        -p WorkingDirectory="$PWD" -p KillMode=mixed \
+        env "${ENV[@]}" "$PWD/.venv/bin/python" -m steel
+    echo "Steel starting as user unit steel-run (journalctl --user -u steel-run -f)"
+else
+    mkdir -p state
+    nohup env "${ENV[@]}" "$PWD/.venv/bin/python" -m steel >> state/steel.log 2>&1 &
+    echo "Steel starting, pid $!, log state/steel.log"
+fi

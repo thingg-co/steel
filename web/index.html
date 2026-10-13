@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Steel</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='88'%3E%E2%9A%99%EF%B8%8F%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+<script>(function(){try{var t=localStorage.getItem("steel.theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t;}catch(e){}})();</script>
+</head>
+<body data-view="market">
+<header class="top">
+  <div class="brand"><span class="fire">⚙️</span> Steel <span class="sub">continuously learning crypto market model</span></div>
+  <div class="status">
+    <span class="pill" id="feed">feed: ?</span>
+    <span class="pill" id="learning">learning</span>
+    <span class="kv"><label>bars</label><b id="bars">0</b></span>
+    <span class="kv"><label>pending</label><b id="pending">0</b></span>
+    <span class="pill market-nav" id="market" title="trades around the clock; the border pulses with live data"><span id="market-label">24/7</span><label class="alert-dot" title="sound alerts on major events"><input type="checkbox" id="sound-toggle"><i></i></label></span>
+  </div>
+  <nav class="tabs">
+    <button data-tab="market" class="active">Market</button>
+    <button data-tab="names">Names</button>
+    <button data-tab="book">Book</button>
+    <button data-tab="venues">Venues</button>
+    <button data-tab="research">Research</button>
+    <button data-tab="ops">Ops</button>
+  </nav>
+  <button id="theme-toggle" class="tgl" type="button" aria-label="Switch theme" title="Switch theme">☀</button>
+</header>
+
+<main id="market" class="view">
+  <section class="panel market" id="market-panel">
+    <div class="market-head">
+      <h3>Whole market <small id="market-meta">scanning…</small></h3>
+      <div class="market-stats" id="market-stats"></div>
+    </div>
+    <div class="market-grid">
+      <div class="market-sectors"><div class="mlabel">Categories</div><div class="sector-heat" id="sector-heat"></div></div>
+      <div class="market-movers" id="market-movers"></div>
+    </div>
+  </section>
+  <section class="panel" id="dislocation-panel">
+    <h3>Cross-venue dislocations <small id="dis-meta">the same name quoted on every venue; a bid on one above an ask on another, net of both taker fees</small></h3>
+    <div class="pstats" id="dis-stats"></div>
+    <div class="radar-table" id="dis-table"></div>
+  </section>
+  <section class="panel market-watch" id="market-watch">
+    <div class="mw-head">
+      <h3>Market watch <small id="mw-meta">everything we can see, most urgent first</small></h3>
+      <input type="text" id="watch-filter" placeholder="filter…" autocomplete="off">
+    </div>
+    <div class="watch-grid" id="watch-grid"></div>
+  </section>
+  <section class="panel brief-panel" id="brief-panel" hidden><h3>Narrative brief <small>written on-device by a local model</small></h3>
+  <div class="brief" id="brief-body"><div class="why">waiting for the first market scan…</div></div>
+  </section>
+  <section class="panel radar">
+    <div class="radar-head">
+      <h3>Movers radar <small id="radar-meta">the top names by market cap</small></h3>
+      <input type="text" id="radar-filter" placeholder="filter symbol…" autocomplete="off">
+    </div>
+    <div class="radar-table" id="radar-table"></div>
+  </section>
+  <section class="panel news">
+    <div class="news-head">
+      <h3>News skim <small id="news-meta">not run yet</small></h3>
+    </div>
+    <div class="news-body">
+      <div class="tone" id="tone"></div>
+      <ul class="headlines" id="headlines"></ul>
+    </div>
+  </section>
+</main>
+
+<main id="names" class="view">
+  <section class="cards" id="cards"></section>
+  <div class="more-wrap" id="more-wrap" hidden><button id="more-cards">Show 50 more</button><small id="more-meta"></small></div>
+  <section class="panel universe">
+    <div class="sources-head"><h3>Universe <small id="uni-meta">names the model trades — mute to pause, remove to drop (frees compute)</small></h3>
+      <div class="class-toggles" id="class-toggles"></div></div>
+    <div class="uni-add">
+      <input type="text" id="uni-add-input" placeholder="add a name, e.g. ARB or ARB-USD" autocomplete="off" autocapitalize="characters">
+      <button type="button" data-action="add_symbol">Add</button>
+      <button type="button" data-action="add_movers">+ Top 20 movers</button>
+      <button type="button" data-action="refresh_universe">Refresh universe now</button>
+    </div>
+    <div class="uni-list" id="uni-list"></div>
+  </section>
+</main>
+
+<main id="book" class="view">
+  <div class="row pcards">
+    <section class="panel"><div class="peq"><span class="peq-label">paper equity</span><span class="peq-val" id="p-equity">$100,000</span><span class="peq-ret" id="p-return">+0.00%</span></div></section>
+    <section class="panel"><h3>Book</h3><div class="pstats" id="p-stats"></div></section>
+  </div>
+  <section class="panel"><h3>Equity curve <small>$100k book, compounding</small></h3><canvas id="p-curve" class="pcurve"></canvas></section>
+  <section class="panel"><h3>Recent trades <small id="p-tr-meta"></small><button class="mini" id="p-tr-more" hidden>Show all</button> <a class="mini" href="/api/export/paper-trades.csv" download>Export CSV</a> <a class="mini" href="/api/export/paper-transfers.csv" download>Transfers CSV</a></h3><div class="ptable" id="p-trades"></div></section>
+  <div class="row pcards">
+    <section class="panel"><h3>Spot holdings <small id="p-pos-meta"></small></h3><div class="ptable" id="p-positions"></div></section>
+    <section class="panel"><h3>Perp positions <small id="p-opt-meta"></small></h3><div class="ptable" id="p-options"></div></section>
+  </div>
+  <div class="why">Simulated. The model runs a $100k book, rebalancing to its own suggestions with no leverage on the whole and a small cost per trade. Longs are spot; a bearish view is an isolated-margin perp short, so its loss is capped at the margin posted and funding accrues on it. It compounds continuously and persists across restarts. These are not real orders.</div>
+  <section class="panel" id="pf-panel">
+  <div class="paper-head">
+    <div class="peq"><span class="peq-label">exchange balances</span><span class="peq-val" id="pf-total">—</span><span class="peq-ret" id="pf-pnl"></span></div>
+    <div class="pstats"><small id="pf-meta">waiting for balances…</small></div>
+  </div>
+  <div id="pf-accounts"></div>
+  <h3>Equity over time <small id="pfh-meta">real balances, one point per poll</small> <a class="mini" href="/api/export/account-history.csv" download>Export CSV</a></h3>
+  <canvas id="pf-curve" class="pcurve"></canvas>
+  </section>
+</main>
+
+<main id="venues" class="view">
+  <section class="panel sources">
+    <div class="sources-head">
+      <h3>Data sources <small id="sources-meta">toggle any venue; the highest-priority live one serves each symbol</small></h3>
+    </div>
+    <div class="source-list" id="source-list"></div>
+    <div class="news-sources">
+      <h3>News sources <small>merged per asset; sentiment feeds two model features</small></h3>
+      <div class="source-list compact" id="news-source-list"></div>
+    </div>
+  </section>
+  <section class="panel signals">
+    <div class="sources-head">
+      <h3>Signals &amp; strategy <small>Reddit chatter, perp positioning, implied vol and the whole-market scan — fed to the model and the crowd overlay</small></h3>
+      <label class="overlay-toggle" id="overlay-toggle-wrap">Crowd overlay</label>
+      <button type="button" data-action="refresh_signals" id="refresh-signals">Refresh signals</button>
+    </div>
+    <div class="source-list compact" id="signal-list"></div>
+    <div class="signal-assets" id="signal-assets"></div>
+  </section>
+  <section class="panel keys">
+    <div class="sources-head"><h3>API keys <small>all optional; sealed at rest by Steel's vault, never shown in full</small></h3><button type="button" id="run-setup">Setup walkthrough</button></div>
+    <div class="vault-line" id="vault-box"></div>
+    <div class="key-list" id="key-list"></div>
+  </section>
+</main>
+
+<main id="research" class="view">
+  <section class="panel"><h3>Walk-forward backtest <small id="bt-meta"></small> <button class="mini" id="bt-run">Run now</button></h3><div class="bt-progress" id="bt-progress" hidden><i></i></div><div class="pstats" id="bt-stats"></div></section>
+  <section class="panel"><h3>Equity curve <small>cumulative net bps per day; the thin grey line is an always-long 1/N book</small></h3><canvas id="bt-curve" class="pcurve"></canvas></section>
+  <div class="row pcards">
+    <section class="panel"><h3>Days <small id="bt-days-head">newest first, last 40</small></h3><div class="ptable" id="bt-days"></div></section>
+    <section class="panel"><h3>Names <small>best and worst by net bps</small></h3><div class="ptable" id="bt-names"></div></section>
+    <section class="panel"><h3>Proposed gates <small id="sw-meta">the policy's gates swept over the run's stored forecasts: tuned on the first half of the days, confirmed on the second; never applied by itself</small></h3><div class="ptable" id="sw-table"></div></section>
+  </div>
+  <section class="panel" id="mon-panel"><h3>Model monitoring <small id="mon-meta">calibration by name, feature drift over the last day, the daily scorecard</small> <button class="mini" id="mon-run">Refresh</button></h3>
+    <div class="row"><div class="block"><h3>Calibration by name <small>resolved calls, worst first</small></h3><div class="ptable" id="mon-cal"></div></div>
+    <div class="block"><h3>Feature drift <small>standardized: mean should sit near 0, spread near 1</small></h3><div class="ptable" id="mon-drift"></div></div></div>
+    <div class="ptable" id="mon-card"></div></section>
+  <section class="panel" id="arbr-panel"><h3>Arbitrage replay <small id="arbr-meta">the executor's rules over the dislocation log, by latency</small> <button class="mini" id="arbr-run">Recompute</button></h3><div class="ptable" id="arbr-ladder"></div><div class="ptable" id="arbr-pairs"></div></section>
+  <div class="why">Out of sample by construction: a fresh net of the live preset forecasts each day before it trains on that day, the live policy's gates and sizing decide, and the realised hour-ahead returns score it. It runs once a week on the GPU over the timestamped replay; the model that trades is untouched.</div>
+  <section class="panel model">
+    <div class="tiles" id="tiles"></div>
+    <div class="row">
+      <div class="block">
+        <h3>Live pinball loss <small>out of sample, bps</small></h3>
+        <canvas class="spark" id="spark-loss"></canvas>
+      </div>
+      <div class="block">
+        <h3>Directional hit rate <small>EMA, 0.5 = coin flip</small></h3>
+        <canvas class="spark" id="spark-hit"></canvas>
+      </div>
+      <div class="block">
+        <h3>10-90 band coverage <small>target 0.80</small></h3>
+        <canvas class="spark" id="spark-coverage"></canvas>
+      </div>
+    </div>
+    <div class="row">
+      <div class="block">
+        <h3>Regime gate <small>mixture over expert heads</small></h3>
+        <div class="gate" id="gate"></div>
+      </div>
+      <div class="block">
+        <h3>Model</h3>
+        <div class="arch" id="arch"></div>
+      </div>
+      <div class="block wide">
+        <h3>Resolved suggestions</h3>
+        <ul class="log" id="log"></ul>
+      </div>
+    </div>
+    <div class="row holds">
+      <div class="block wide">
+        <h3>Why Steel is holding</h3>
+        <ul class="holds-list" id="holds-list"></ul>
+      </div>
+    </div>
+  </section>
+</main>
+
+<main id="ops" class="view">
+  <section class="panel controls">
+    <form id="controls" class="controls-form"></form>
+    <div class="actions">
+      <button type="button" data-action="pause" id="btn-pause">Pause learning</button>
+      <button type="button" data-action="checkpoint">Save checkpoint</button>
+      <button type="button" data-action="skim">Skim news now</button>
+      <button type="button" data-action="reset" class="danger">Reset model</button>
+    </div>
+  </section>
+  <section class="panel brief-ctl" hidden>
+    <div class="sources-head">
+      <h3>Narrative brief <small>written on-device by a local model (llama-server) — nothing leaves the machine</small></h3>
+      <label class="overlay-toggle" id="brief-toggle-wrap">auto-write</label>
+      <button type="button" id="brief-now">Write now</button>
+    </div>
+    <div class="brief-status" id="brief-status"></div>
+  </section>
+  <section class="panel exec-panel" id="exec-panel"><div class="sources-head"><h3>Execution <small id="exec-meta">off</small></h3></div><div class="pstats" id="exec-stats"></div></section>
+  <section class="panel arb-panel" id="arb-panel"><div class="sources-head"><h3>Arbitrage executor <small id="arb-meta">off</small></h3></div><div class="pstats" id="arb-stats"></div><div class="radar-table" id="arb-recent"></div></section>
+  <section class="panel live-panel" id="live-panel"><div class="sources-head"><h3>Live book <small id="live-meta">paper</small></h3></div><div class="pstats" id="live-stats"></div><div class="live-check" id="live-check"></div><div class="radar-table" id="live-orders"></div></section>
+  <section class="console-grid" id="console-grid"></section>
+  <section class="panel terminal-panel">
+  <div class="term-head">
+    <span class="term-title">Steel console</span>
+    <span class="term-filters" id="term-filters"></span>
+    <button id="term-follow" class="on">following</button>
+    <button id="term-clear">clear</button>
+  </div>
+  <div id="term" class="term"></div>
+  </section>
+</main>
+
+<div class="loading" id="loading" hidden>
+  <div class="loading-card">
+    <div class="sparks" id="spark-field"></div>
+    <div class="loading-title" id="loading-title">Forging Steel…</div>
+    <div class="loading-sub" id="loading-sub">warming up</div>
+    <div class="loading-bar"><i id="loading-bar-i"></i></div>
+  </div>
+</div>
+<div id="onboard" class="onboard" hidden>
+  <div class="onb-card">
+    <button id="onb-close" class="onb-close" title="Skip setup">✕</button>
+    <div class="onb-progress" id="onb-progress"></div>
+    <div class="onb-body" id="onboard-body"></div>
+  </div>
+</div>
+<div class="tooltip" id="tooltip"></div>
+<button id="inject-fab" title="Inject a note to Steel  (⌘/Ctrl+I)">✎ Tell Steel</button>
+<button id="skip-fab" title="Jump past the symbol cards" hidden>↓ Past the cards</button>
+<div id="detail" class="detail" hidden><div class="detail-card">
+  <header><div class="dtitle"><span class="dsym"></span><span class="dmeta"></span></div><div class="dpx"><span class="dprice num"></span><span class="dchg num"></span></div><span class="dbadge"></span><button class="dclose" title="close (Esc)">×</button></header>
+  <div class="dchart"><canvas id="dcanvas"></canvas></div>
+  <div class="dwhy"></div>
+  <div class="dkpis"></div>
+  <div class="dbody"></div>
+</div></div>
+<div id="inject-pop" hidden>
+  <div class="inject-head">Inject input <span>name a watched coin to nudge it, or just leave a market note</span></div>
+  <textarea id="inject-text" rows="3" placeholder="e.g. BTC looks like a breakout, going long — CPI at 8:30 — fade the SOL pump"></textarea>
+  <div class="inject-row"><span class="inject-ack" id="inject-ack"></span><button id="inject-send">Send &crarr;</button></div>
+</div>
+
+<script src="/static/app.js"></script>
+<footer class="foot">Steel · uptime <b id="uptime">0s</b> · © 2026 <a href="https://thingg.co" target="_blank" rel="noopener">thingg.co</a> · PolyForm Noncommercial</footer>
+</body>
+</html>
