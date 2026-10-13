@@ -48,6 +48,13 @@ ul { padding-left: 20px; margin: 0 0 14px; } li { margin: 4px 0; max-width: 72ch
 table { border-collapse: collapse; width: 100%; font-size: 14.5px; } .tw { overflow-x: auto; margin: 10px 0 18px; }
 th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; } th { color: var(--muted); font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; font-weight: 500; }
 td.k { white-space: nowrap; color: var(--ink); font-weight: 600; }
+/* narrow: four columns do not fit beside a nowrap first one, so each row of the routine stacks */
+@media (max-width: 760px) {
+  #research tr:first-child { display: none; } #research tr { display: block; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  #research td { display: block; border: 0; padding: 2px 0 6px; } #research td.k { white-space: normal; }
+  #research td:not(.k)::before { display: block; font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  #research td:nth-child(2)::before { content: "What they read"; } #research td:nth-child(3)::before { content: "Steel today"; } #research td:nth-child(4)::before { content: "Proposal"; }
+}
 .src { font-size: 13.5px; color: var(--muted); } .src a { color: var(--ink-2); }
 
 /* the identity sheet */
