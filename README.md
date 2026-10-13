@@ -20,35 +20,33 @@ The public page is [steel.thingg.co](https://steel.thingg.co) (served from `docs
 
 ## Screenshots
 
-The Market view: the whole market by category, the cross-venue dislocation monitor and the
-news skim, with the status strip saying which venues are feeding.
+Each picture follows your theme: GitHub shows the dark one on a dark setting and the light one otherwise.
 
-![Market view](docs/img/market.png)
+The Desk: the status strip with the trader's routine, the screener as a table or a heatmap, the
+model's calls and cards, the next events and the dislocations.
 
-A pair's detail from the Names view: the chart with the forecast fan, the 1-hour, 4-hour and
-1-day medians, why the policy is holding, and the Ticket button.
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/desk-dark.png"><img src="docs/img/desk-light.png" alt="The Desk view"></picture>
 
-![Pair detail](docs/img/detail.png)
+The Chart with the pair rail: candles from every venue's prints, the forecast fan with the longer
+horizons' medians, the layers, and the pair's tape, book, derivatives and options beside it.
 
-| Names | Book |
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/chart-dark.png"><img src="docs/img/chart-light.png" alt="The Chart view with the pair rail"></picture>
+
+| Flow | Model |
 |---|---|
-| ![Names](docs/img/names.png) | ![Book](docs/img/book.png) |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/flow-dark.png"><img src="docs/img/flow-light.png" alt="Flow: leverage across the market and the options surface"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/model-dark.png"><img src="docs/img/model-light.png" alt="Model: the indicator editor, the backtest and the scorecard"></picture> |
 
-| Venues | Research | Ops |
+| Book | Venues | Ops |
 |---|---|---|
-| ![Venues](docs/img/venues.png) | ![Research](docs/img/research.png) | ![Ops](docs/img/ops.png) |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/book-dark.png"><img src="docs/img/book-light.png" alt="Book"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/venues-dark.png"><img src="docs/img/venues-light.png" alt="Venues"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/ops-dark.png"><img src="docs/img/ops-light.png" alt="Ops"></picture> |
 
-The Chart view: candles from every venue's prints, the forecast fan with the longer horizons'
-medians, and the operator's own Python indicators in their panes (here the VWAP deviation).
-
-![Chart](docs/img/chart.png)
-
-The screener as a heatmap (tiles colored by any stored series, the biggest names wider), the
-calendar and the prediction markets, and the series alerts on Ops.
+The screener as a heatmap, the calendar and prediction markets, and the series alerts on Ops.
 
 | Screener | Events and prediction markets | Series alerts |
 |---|---|---|
 | ![Screener](docs/img/screener.png) | ![Events](docs/img/events.png) | ![Alerts](docs/img/alerts.png) |
+
+On a phone: <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/phone-dark.png"><img src="docs/img/phone-light.png" alt="The Desk on a phone"></picture>
 
 ## Setup
 
