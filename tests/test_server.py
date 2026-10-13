@@ -239,3 +239,13 @@ class TestCORS:
             response = client.get("/api/state", headers={"Origin": "http://tauri.localhost"})
             assert response.status_code == 200
             assert response.headers["access-control-allow-origin"] == "*"
+
+
+def test_docs_are_served_from_the_box():
+    """docs/ (the whitepaper, the design proposal) is reachable from the dashboard's host."""
+    from fastapi.testclient import TestClient
+    with TestClient(create_app(make_engine())) as client:
+        r = client.get("/docs/whitepaper.html")
+        assert r.status_code == 200 and "<html" in r.text.lower()
+        assert client.get("/docs/design/redesign-proposal.html").status_code == 200
+        assert client.get("/docs/nope.html").status_code == 404

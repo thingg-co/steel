@@ -247,6 +247,7 @@ class Config:
     model_dollar_volume: float = _env("MODEL_DOLLAR_VOLUME", 1e6)  # the modeling floor in liquid mode: names trading less a day are not worth a row (the trading floor, min_dollar_volume, is separate)
     dislocation_min_bps: float = _env("DISLOCATION_MIN_BPS", 0.0)   # an episode needs the cross-venue gap, net of both taker fees, above this
     dislocation_latency_bps: float = _env("DISLOCATION_LATENCY_BPS", 0.0)  # a margin for the price moving while the orders travel
+    dislocation_max_gap_bps: float = _env("DISLOCATION_MAX_GAP_BPS", 500.0)  # a gross gap beyond this is a wrong quote (another asset or unit, a broken book), never an episode
     dislocation_stale_s: float = _env("DISLOCATION_STALE_S", 10.0)   # a venue's quote older than this is not a leg
     # The GPU handoff with Flint (steel/handoff.py)
     handoff: bool = _env("HANDOFF", True)                     # watch for the peer and switch between shared and solo modes
@@ -257,9 +258,28 @@ class Config:
     handoff_lead_minutes: float = _env("HANDOFF_LEAD_MINUTES", 15.0)    # release the GPU this long before the peer starts
     solo_train_multiplier: float = _env("SOLO_TRAIN_MULTIPLIER", 3.0)   # train_epochs x this while the peer is off
     solo_memory_floor_gb: float = _env("SOLO_MEMORY_FLOOR_GB", 2.0)     # memory_floor_gb while the peer is off
+    # Order books (steel/book.py)
+    books: bool = _env("BOOKS", True)                         # subscribe to each live venue's depth (Binance, Bybit, OKX, Kraken, Hyperliquid)
+    book_mb: float = _env("BOOK_MB", 64.0)                    # memory for the decimated level history (the heatmap), split across the universe
+    book_history_s: float = _env("BOOK_HISTORY_S", 15.0)      # how often a row of levels is kept per venue
+    book_levels: int = _env("BOOK_LEVELS", 40)                # levels per side per venue kept in that row
+    # Derivatives feeds (steel/derivs.py, steel/sources/derivs.py)
+    derivs: bool = _env("DERIVS", True)                       # liquidations, OI, funding and mark from the perp venues' public streams
+    derivs_venues: str = _env("DERIVS_VENUES", "binance,bybit,okx,hyperliquid")  # which feeds run (ids binance-perp, bybit-perp, okx-perp; a bare venue name works)
+    liq_mb: float = _env("LIQ_MB", 16.0)                      # memory for liquidation events, split across the universe
+    liq_alert_usd: float = _env("LIQ_ALERT_USD", 250000.0)    # alert on a single liquidation at or above this notional (0 = off)
+    # The trade tape (steel/tape.py)
+    tape_mb: float = _env("TAPE_MB", 256.0)                   # memory for every live venue's prints, split across the universe (about 8M prints)
+    tape_hours: float = _env("TAPE_HOURS", 24.0)              # how far back the tape answers
+    tape_alert_usd: float = _env("TAPE_ALERT_USD", 0.0)       # alert on a single print at or above this notional (0 = off)
+    bubble_usd: float = _env("BUBBLE_USD", 100000.0)          # a print at or above this notional is a bubble on the chart
+    predictions_minutes: float = _env("PREDICTIONS_MINUTES", 10.0)  # how often Polymarket's crypto markets are read (0 = off)
+    options_minutes: float = _env("OPTIONS_MINUTES", 10.0)   # how often Deribit's BTC and ETH chains are refreshed for the GEX, smile and term structure (0 = off)
+    absorption_sensitivity: float = _env("ABSORPTION_SENSITIVITY", 50.0)  # 10 (few flags) to 90 (many): how large new positioning must be, relative to recent bars, with price not moving
     # The operator token (steel/auth.py)
     auth: str = _env("AUTH", "mutate")                        # mutate: every POST needs the token (the default) | all: reads and the websocket too | off: nothing does
     token: str = _env("TOKEN", "")                            # the operator token; empty = generated at first start, sealed in the vault, printed by `steel token`
+    api_weight_per_minute: int = _env("API_WEIGHT_PER_MINUTE", 1200)   # the /api/v1 weight budget per token per minute (steel/apiv1.py)
     backup_dir: str = _env("BACKUP_DIR", "")                  # when set, the engine writes a `steel backup` archive there once a day
     backup_keep: int = _env("BACKUP_KEEP", 14)                # how many daily archives to keep there
     backup_replay: bool = _env("BACKUP_REPLAY", False)        # include the replay buffer in the daily archive (large)

@@ -170,3 +170,16 @@ def test_apex_balances_from_the_documented_shape():
     assert pepe["qty"] == -3000.0 and pepe["entry"] == pytest.approx(4e-6) and pepe["price"] == pytest.approx(4e-6) and pepe["upnl"] == 0.0   # no oracle mark: marked at entry
     assert not any(r["asset"] == "SOL" for r in rows)
     assert a.parse({"positions": [{"symbol": "ETH-USDT", "side": "SELL", "size": "2", "entryPrice": "2500"}]}, {})[0]["qty"] == -2.0
+
+
+def test_hyperliquid_subaccounts_and_vaults():
+    """subAccounts rows carry address/name; vault equity is a USDC line; an empty answer adds nothing."""
+    a = HyperliquidAccount(address="0xdfc24b077bc1425ad1dea75bcb6f8158e10df303")
+    subs = [{"name": "alpha", "subAccountUser": "0x1", "clearinghouseState": {"marginSummary": {"accountValue": "250", "totalMarginUsed": "0"}, "assetPositions": [
+        {"position": {"coin": "ETH", "szi": "2", "positionValue": "5000", "entryPx": "2400", "unrealizedPnl": "200", "leverage": {"value": 3}}}]}, "spotState": {"balances": [{"coin": "USDC", "total": "10", "hold": "0"}]}}]
+    vaults = [{"vaultAddress": "0xabcdef0000", "equity": "1234.5"}, {"vaultAddress": "0x0", "equity": "0"}]
+    rows = a.parse_subaccounts(subs, vaults)
+    assert all(r["id"].endswith("/alpha") for r in rows[:-1]) and rows[-1]["id"].endswith("vault 0xabcd") and rows[-1]["qty"] == 1234.5
+    eth = next(r for r in rows if r["asset"] == "ETH")
+    assert eth["kind"] == "perp" and eth["qty"] == 2.0 and eth["leverage"] == 3
+    assert a.parse_subaccounts([], []) == [] and a.parse_subaccounts(None, None) == []

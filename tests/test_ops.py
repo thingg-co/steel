@@ -222,6 +222,16 @@ def test_monitor_and_ticket():
     assert m["calibration"] == [{"symbol": "BTC-USD", "n": 2, "hit": 0.5, "inside": 0.5, "mae_bps": 18.5, "pnl_bps": -2.0}]
     flags = {d["feature"]: d["flag"] for d in m["drift"]}
     assert flags == {"ret": "dead", "vol": "shifted", "flow": ""} and m["scorecard"] == []
+    # the net's input weight per feature rides along when the learner has a model
+    import torch
+    e.learner.model = SimpleNamespace(inp=SimpleNamespace(weight=torch.tensor([[1.0, 0.0, 2.0], [0.0, 0.0, 2.0]])))
+    E.FEATURES = ["ret", "vol", "flow"]
+    try:
+        m2 = Engine.monitor(e)
+    finally:
+        E.FEATURES = old
+    w = {d["feature"]: d["weight"] for d in m2["drift"]}
+    assert w["vol"] == 0.0 and abs(w["ret"] + w["vol"] + w["flow"] - 1.0) < 1e-6 and w["flow"] > w["ret"]
     # the ticket
     e2 = SimpleNamespace(cfg=SimpleNamespace(long_mode="perp", trade_venue_perp="hyperliquid", trade_venue_spot="coinbase", live_scale=0.1, stop_loss_bps=300.0,
                                              take_profit_bps=600.0, max_hold_bars=12, bar_seconds=300.0, short_leverage=2.0, long_leverage=1.0, paper_start=100000.0),
@@ -235,3 +245,18 @@ def test_monitor_and_ticket():
     e2.latest["BTC-USD"] = {"side": 0, "action": "HOLD", "size": 0, "why": "holding: thin"}
     assert "no order: holding: thin" in Engine.ticket(e2, "BTC-USD")["text"]
     assert Engine.ticket(e2, "ZZZ-USD")["error"]
+
+
+def test_period_levels_from_the_replays_closes():
+    import numpy as np, time
+    from steel.engine import Engine
+    now = time.time()
+    day = int(now // 86400) * 86400
+    t = np.array([day - 86400 + k * 300 for k in range(288)] + [day + k * 300 for k in range(12)], dtype=float)   # yesterday whole, today's first hour
+    closes = np.concatenate([np.linspace(100, 110, 288), np.linspace(111, 112, 12)])
+    e = SimpleNamespace(symbols=["BTC-USD"], learner=SimpleNamespace(size=len(t), store=SimpleNamespace(t=t, close=closes.reshape(-1, 1))))
+    lv = Engine.levels(e, "BTC-USD")
+    by = {x["id"]: x["px"] for x in lv["levels"]}
+    assert by["do"] == 111.0 and by["dh"] == 112.0 and by["dl"] == 111.0 and by["pdh"] == 110.0 and by["pdl"] == 100.0 and by["pdc"] == 110.0 and by["pdeq"] == 105.0
+    assert "wo" in by and "mo" in by and lv["note"] == "from 5-minute closes"
+    assert Engine.levels(SimpleNamespace(symbols=["BTC-USD"], learner=SimpleNamespace(size=0, store=SimpleNamespace(t=np.zeros(0), close=np.zeros((0, 1))))), "BTC-USD")["levels"] == []

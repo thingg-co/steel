@@ -30,11 +30,21 @@ from .signals import SignalHub
 from .target import hedge_targets, index_columns
 from .sources import SourceManager, asset_class, base_of
 from . import alerts as _alerts
+from . import rules as _rules
+from . import apiv1 as _apiv1
+from . import indicators as _indicators
 from .market import SECTOR_MAP
 from . import auth as _auth
 from . import arbreplay as _arbreplay
 from . import backup as _backup
 from .handoff import Handoff
+from .options import OptionsHub
+from . import calendar as _calendar
+from .predict import PredictionHub
+from .tape import Tape
+from .book import BookStore
+from .derivs import LiqStore, PerpStats
+from .sources.derivs import DerivManager
 from . import clockcheck as _clockcheck
 from . import vault as _vault
 from .dislocation import DislocationMonitor
@@ -407,6 +417,9 @@ class Engine:
         self.trace = Trace(self._publish)
         self.vault = _vault.get(cfg.state_dir)                 # every key file sealed at rest; plaintext ones found here are sealed in place
         self.handoff = Handoff(cfg)
+        self.options = OptionsHub()
+        self.predictions = PredictionHub()
+        self.events = _calendar.load(cfg.state_dir)
         self.fee_tiers: dict[str, dict] = {}                 # venue -> its real fee rates (bps per leg) from its reader, once a day
         self.token, fresh_token = _auth.load(cfg.state_dir, str(getattr(cfg, "token", "") or ""))
         if fresh_token:
@@ -414,6 +427,12 @@ class Engine:
         sealed = self.vault.seal_all([svc["file"] for svc in KEY_SERVICES])
         self.alerts = _alerts.Alerts(self.vault.read_json(Path(_alerts.SERVICE["file"])) if Path(_alerts.SERVICE["file"]).exists() else {})
         self.trace.on_emit = self.alerts.on_trace
+        self.rules = _rules.RuleBook(Path(cfg.state_dir) / "rules.json")   # the operator's series alerts (M19)
+        self.streams: list[dict] = []                      # /api/v1/stream subscribers (steel/apiv1.py)
+        self.indicators = _indicators.Hub(Path(cfg.state_dir) / "indicators")   # the operator's Python indicators (M22)
+        self.indicators.ensure_examples()
+        self.indicators.reload()
+        self._book_pushed: dict[str, float] = {}
         self._alerted_action: dict[str, str] = {}
         if sealed:
             log.warning("vault: sealed %d plaintext key file(s): %s", len(sealed), ", ".join(sealed))
@@ -483,9 +502,24 @@ class Engine:
         self.features = FeatureBuilder(self.symbols, cfg.window)
         self.news_base = {s: (0.0, 0.0) for s in self.symbols}  # last pure news skim, before operator blend
         self.learner = OnlineLearner(cfg, N_FEATURES, features=FEATURES)
+        if getattr(self, "liqs", None) is not None:
+            self.liqs.resize(list(self.symbols))
+        else:
+            self.liqs = LiqStore(list(self.symbols), mb=float(getattr(cfg, "liq_mb", 16.0) or 0.0))
+            self.perps = PerpStats()
+        self.derivs = DerivManager(cfg, list(self.symbols), self._on_liq, self._on_perp_stats, lambda v, p: self.perps.stats.get((v, p)), trace=self.trace)
+        if getattr(self, "books", None) is not None:
+            self.books.resize(list(self.symbols))
+        else:
+            self.books = BookStore(list(self.symbols), mb=float(getattr(cfg, "book_mb", 64.0) or 0.0), history_s=float(getattr(cfg, "book_history_s", 15.0) or 15.0),
+                                   levels=int(getattr(cfg, "book_levels", 40) or 40))
+        if getattr(self, "tape", None) is not None:
+            self.tape.resize(list(self.symbols))                      # a rebuild keeps the prints of the pairs that stay
+        else:
+            self.tape = Tape(list(self.symbols), mb=float(getattr(cfg, "tape_mb", 256.0) or 0.0), keep_s=float(getattr(cfg, "tape_hours", 24.0) or 24.0) * 3600.0)
         self.sources = SourceManager(cfg, self.symbols, on_tick=self._on_live_tick, state_path=Path(cfg.state_dir) / "sources.json",
                                      on_provider_change=self._on_provider_change, trace=self.trace, on_quote=self._on_quote,
-                                     on_book=self._on_book)
+                                     on_book=self._on_book, on_trade=self._on_trade, on_depth=self._on_depth)
         self.identity = IdentityBook(cfg.state_dir, getattr(cfg, "coingecko_key", ""))
         self.sources.identity_ok = self._identity_ok
         self.execution = ExecutionGate(cfg, cfg.state_dir)
@@ -495,6 +529,7 @@ class Engine:
         self.live = LiveBook(cfg, self.executors, self.execution, cfg.state_dir, trace=self.trace)
         self.dislocations = DislocationMonitor(self._taker_bps, min_edge_bps=float(getattr(cfg, "dislocation_min_bps", 0.0) or 0.0),
                                                latency_bps=float(getattr(cfg, "dislocation_latency_bps", 0.0) or 0.0),
+                                               max_gap_bps=float(getattr(cfg, "dislocation_max_gap_bps", 500.0) or 0.0),
                                                stale_s=float(getattr(cfg, "dislocation_stale_s", 10.0) or 10.0),
                                                log_path=Path(cfg.state_dir) / "dislocations.jsonl")
         self.arb = ArbExecutor(cfg, self.executors, self.execution, venue_kind={vid: src.venue for vid, src in self.sources.sources.items()},
@@ -611,6 +646,8 @@ class Engine:
         self.subs.discard(q)
 
     def _publish(self, msg: dict) -> None:
+        if self.streams and msg.get("type") == "bar":
+            _apiv1.push(self, "bars", None, {"t": time.time(), "index": msg.get("index"), "bars": msg.get("bars")})
         if not self.subs:
             return
         text = json.dumps(clean(msg), separators=(",", ":"))
@@ -869,6 +906,7 @@ class Engine:
             t.cancel()
         await self._panic_on_stop()
         await self.sources.stop()
+        await self.derivs.stop()
         await asyncio.to_thread(self._save)
         try:
             await asyncio.wait_for(self.alerts.flush(), 5.0)
@@ -952,7 +990,7 @@ class Engine:
         self._publish({"type": "status", "status": self.status_dict()})
         enabled = [sid for sid, on in self.sources.enabled.items() if on]
         self.trace.emit("feed", f"sources enabled: {', '.join(enabled)}; backfilling "
-                                f"{cfg.backfill_seconds / 86400:.1f} days per symbol from the best available")
+                                f"{cfg.backfill_seconds / 86400:.1f} days per pair from the best available")
         cutoff = time.time() - cfg.backfill_seconds
         self._deep_cutoff = cutoff                     # deep-backfill loop pages further back from here
         held = self.learner.rt[:self.learner.size]
@@ -991,8 +1029,9 @@ class Engine:
         self._publish(self.snapshot())   # full resync: clients that connected during backfill/warmup now get the built bars (no reload needed)
         self.trace.emit("system", "live: streaming ticks, forecasting every bar, learning as labels mature")
         self.sources.start()
+        self.derivs.start()
         self._tasks = [asyncio.create_task(c) for c in
-                       (self._clock(), self._ticker(), self._checkpoints(), self._news_loop(), self._signals_loop(), self._market_loop(), self._brief_loop(), self._portfolio_loop(), self._deep_backfill_loop(), self._train_loop(), self._backtest_loop(), self._universe_loop(), self._dislocation_loop(), self._identity_loop(), self._alerts_loop(), self._clock_check_loop(), self._backup_loop(), self._handoff_loop(), self._fees_loop())]
+                       (self._clock(), self._ticker(), self._checkpoints(), self._news_loop(), self._signals_loop(), self._market_loop(), self._brief_loop(), self._portfolio_loop(), self._deep_backfill_loop(), self._train_loop(), self._backtest_loop(), self._universe_loop(), self._dislocation_loop(), self._identity_loop(), self._alerts_loop(), self._clock_check_loop(), self._backup_loop(), self._handoff_loop(), self._fees_loop(), self._options_loop(), self._predictions_loop(), self._rules_loop())]
         await asyncio.gather(*self._tasks)
 
     def _ingest_history(self, ticks: list[Tick]) -> None:
@@ -1688,6 +1727,45 @@ class Engine:
     def alerts_status(self) -> dict:
         return self.alerts.status()
 
+    def algo_status(self) -> dict:
+        runner = getattr(self, "_algos", None)
+        runs = list(runner.runs) if runner else []
+        return {"runs": runs[-20:], "running": sum(1 for r in runs if "ended" not in r), "execution": self.execution.enabled, "armed": sorted(self.execution.armed),
+                "dry_run": bool(getattr(self.cfg, "execution_dry_run", True)), "kinds": ["twap", "scale", "chase"]}
+
+    def algo_action(self, payload: dict) -> dict:
+        """Start a TWAP, scale or chase on one pair through the gate (steel/execution/algos.py).
+        The order is the operator's, sized in base units or USD; every child clears the gate
+        like any order, so with execution off, the venue unarmed or the kill switch on nothing
+        is sent, and with `execution_dry_run` (the default) nothing ever leaves the box."""
+        from .execution import Order as _Order
+        from .execution.algos import KINDS, AlgoRunner
+        kind = str(payload.get("kind") or "")
+        if kind not in KINDS:
+            return {"error": f"kind must be one of {', '.join(KINDS)}", **self.algo_status()}
+        sym = canonical(str(payload.get("pair") or payload.get("symbol") or ""))
+        side = str(payload.get("side") or "").lower()
+        if sym not in self.symbols or side not in ("buy", "sell"):
+            return {"error": "a modeled pair and a side (buy or sell)", **self.algo_status()}
+        px = float((self.prices.get(sym) or {}).get("price") or 0.0)
+        if not px:
+            return {"error": "no price for this pair yet", **self.algo_status()}
+        try:
+            qty = float(payload.get("qty") or 0.0) or float(payload.get("usd") or 0.0) / px
+        except (TypeError, ValueError):
+            qty = 0.0
+        if qty <= 0:
+            return {"error": "qty (base units) or usd", **self.algo_status()}
+        venue = str(payload.get("venue") or getattr(self.cfg, "trade_venue_perp" if str(payload.get("kind_of") or "perp") == "perp" else "trade_venue_spot", "") or "")
+        order = _Order(venue, sym, side, qty, None, str(payload.get("kind_of") or "perp"), bool(payload.get("reduce_only")), notional_usd=qty * px, note=f"algo {kind} by the operator")
+        if getattr(self, "_algos", None) is None:
+            self._algos = AlgoRunner(self.execution, getattr(self, "executors", {}), book=lambda s: ((self.prices.get(s) or {}).get("bid"), (self.prices.get(s) or {}).get("ask")))
+        params = {k: v for k, v in (payload.get("params") or {}).items() if k in ("slices", "every_s", "limit_bps", "start", "end", "levels", "front", "max_chase_bps", "max_repegs", "finish_at_market")}
+        lev = float(payload.get("leverage") or (getattr(self.cfg, "short_leverage", 1.0) if side == "sell" else getattr(self.cfg, "long_leverage", 1.0)) or 1.0)
+        self.trace.emit("operator", f"algo {kind} {side} {qty:g} {sym} on {venue}: {params}", "act")
+        asyncio.create_task(self._algos.run(kind, order, leverage=lev, **params))
+        return {"started": kind, "order": {"venue": venue, "symbol": sym, "side": side, "qty": qty, "notional_usd": qty * px}, **self.algo_status()}
+
     async def arb_replay(self, days: float = 7.0, force: bool = False) -> dict:
         """The arbitrage rules replayed over the dislocation log (steel/arbreplay.py), cached ten minutes."""
         cached = getattr(self, "_arb_replay", None)
@@ -1702,6 +1780,48 @@ class Engine:
                                       cooldown_s=float(getattr(c, "arb_cooldown_s", 60.0) or 60.0), stable=str(getattr(c, "transfer_asset", "USDC") or "USDC"))
         self._arb_replay = res
         return res
+
+    async def _rules_loop(self) -> None:
+        """The operator's series alerts, every ten seconds over the screener's rows."""
+        while True:
+            await asyncio.sleep(10)
+            if self.status != "live" or not any(r.get("enabled", True) for r in self.rules.rules):
+                continue
+            try:
+                fired = self.rules.evaluate(self.screener().get("rows", []))
+            except Exception as e:  # noqa: BLE001
+                log.warning("rules: %s: %s", type(e).__name__, e)
+                continue
+            for ev in fired:
+                self.trace.emit("signals", "alert: " + ev["text"], "act", {"rule": ev["id"], "pair": ev["pair"]})
+                self.alerts.send("rule", ev["text"], key=ev["id"] + ":" + ev["pair"], level="warn")
+                self._publish({"type": "rule", "event": ev})
+                _apiv1.push(self, "rules", ev["pair"], ev)
+
+    def rules_status(self) -> dict:
+        return {**self.rules.status(), "pairs": list(self.symbols)}
+
+    def rules_action(self, payload: dict) -> dict:
+        act = str(payload.get("action") or "add")
+        try:
+            if act == "add":
+                self.rules.add(payload)
+            elif act == "remove":
+                self.rules.remove(str(payload.get("id") or ""))
+            elif act == "toggle":
+                self.rules.toggle(str(payload.get("id") or ""), payload.get("enabled"))
+            elif act == "test":
+                rule = self.rules.get(str(payload.get("id") or ""))
+                if not rule:
+                    return {"error": "no such rule", **self.rules_status()}
+                text = "test: " + _rules.describe(rule)
+                self.alerts.send("rule", text, key="test:" + rule["id"], level="info")
+                self._publish({"type": "rule", "event": {"id": rule["id"], "pair": rule["pair"], "series": rule["series"], "value": None, "t": time.time(), "text": text}})
+            else:
+                return {"error": f"unknown action {act!r}", **self.rules_status()}
+        except ValueError as e:
+            return {"error": str(e), **self.rules_status()}
+        return self.rules_status()
 
     async def _alerts_loop(self) -> None:
         while True:
@@ -1777,6 +1897,18 @@ class Engine:
                     drift.append({"feature": name, "mean": round(mu, 3), "sd": round(s_, 3), "flag": flag})
         except Exception:  # noqa: BLE001
             drift = []
+        # the net's input weight per feature (the L2 norm of its column in the first projection, as a share of all):
+        # what the net can read from a feature, not what it causes; a near-zero share says the column is ignored
+        try:
+            model = getattr(self.learner, "model", None)
+            W = model.inp.weight.detach().float().cpu().numpy() if model is not None and hasattr(model, "inp") else None
+            if W is not None and len(drift) and W.shape[1] >= len(drift):
+                norms = np.sqrt((W ** 2).sum(axis=0))
+                total = float(norms.sum()) or 1.0
+                for j, row in enumerate(drift):
+                    row["weight"] = round(float(norms[j]) / total, 4)
+        except Exception:  # noqa: BLE001
+            pass
         card = []
         try:
             with open(os.path.join(self.cfg.state_dir, SCORECARD_FILE)) as f:
@@ -1912,6 +2044,54 @@ class Engine:
                 pass
             await asyncio.sleep(86400)
 
+    async def _options_loop(self) -> None:
+        """Deribit's BTC and ETH chains every options_minutes: GEX by strike, the smile, the term
+        structure, and two features for the pairs on those assets."""
+        every = float(getattr(self.cfg, "options_minutes", 10.0) or 0.0)
+        if every <= 0:
+            return
+        await asyncio.sleep(20)
+        while True:
+            for asset in self.options.assets:
+                out = await self.options.refresh(asset)
+                if out:
+                    self.trace.emit("signals", f"options {asset}: {out['n']} contracts, GEX {out['total'] / 1e6:+.1f}M per 1%, zero gamma {out['zero_gamma']}, max pain {out['max_pain']}")
+                    for s in self.symbols:
+                        if base_of(s) == asset:
+                            self.features.set_options(s, self.options.features(asset))
+                elif self.options.error.get(asset):
+                    self.trace.emit("signals", f"options {asset}: {self.options.error[asset]}", "warn")
+            self._publish({"type": "options", "options": {a: self.options_view(a) for a in self.options.assets}})
+            await asyncio.sleep(every * 60.0)
+
+    async def _predictions_loop(self) -> None:
+        every = float(getattr(self.cfg, "predictions_minutes", 10.0) or 0.0)
+        if every <= 0:
+            return
+        await asyncio.sleep(30)
+        while True:
+            ms = await self.predictions.refresh()
+            if ms:
+                self.trace.emit("signals", f"prediction markets: {len(ms)} open crypto markets on Polymarket; top: {ms[0]['question'][:60]} ({ms[0]['yes'] * 100:.0f}% yes)")
+            elif self.predictions.error:
+                self.trace.emit("signals", f"prediction markets: {self.predictions.error}", "warn")
+            self._publish({"type": "predictions", "predictions": self.predictions_view()})
+            await asyncio.sleep(every * 60.0)
+
+    def predictions_view(self) -> dict:
+        return {"markets": self.predictions.markets[:40], "status": self.predictions.status()}
+
+    def calendar_view(self) -> dict:
+        now = time.time()
+        return {"upcoming": _calendar.upcoming(self.events, now, n=14), "event_hours": _calendar.event_hours(self.events, now), "t": now,
+                "note": "FOMC, CPI and jobs dates as published for 2026; expiries computed; state/calendar.json adds more"}
+
+    def options_view(self, asset: str) -> dict:
+        a = self.options.latest.get(asset.upper())
+        if not a:
+            return {"asset": asset.upper(), "error": self.options.error.get(asset.upper(), "not fetched yet"), "status": self.options.status()}
+        return {**a, "features": self.options.features(asset.upper()), "status": self.options.status()}
+
     async def _handoff_loop(self) -> None:
         """Every minute: is Flint here, or about to be? Switch modes, and in the lead-up give the
         GPU back (background training pauses on `handoff.released`; the CUDA cache is emptied)."""
@@ -2015,6 +2195,334 @@ class Engine:
         if p:
             p["bid"] = bid
             p["ask"] = ask
+
+    def _on_trade(self, venue: str, t: Tick) -> None:
+        """Every real print from every live venue lands on the tape; a large one may alert."""
+        if not self.tape.add(venue, t.symbol, t.ts, t.price, t.size, t.taker_buy):
+            return
+        if self.streams:
+            _apiv1.push(self, "trades", t.symbol, {"t": t.ts, "venue": venue, "px": t.price, "sz": t.size, "usd": t.price * t.size, "side": 1 if t.taker_buy else -1 if t.taker_buy is False else 0})
+        big = float(getattr(self.cfg, "tape_alert_usd", 0.0) or 0.0)
+        if big > 0 and t.price * t.size >= big:
+            self.alerts.send("fill", f"large print: {'buy' if t.taker_buy else 'sell' if t.taker_buy is False else 'trade'} {t.price * t.size:,.0f} USD "
+                                     f"{base_of(t.symbol)} on {venue} at {t.price:,.6g}", key=t.symbol)
+
+    def _on_depth(self, venue: str, pair: str, bids, asks, snapshot: bool, ts, quote: str = "USD", depth: int | None = None) -> None:
+        self.books.apply(venue, pair, bids, asks, snapshot, ts, quote=quote, depth=depth)
+        if self.streams:
+            now = time.time()
+            if now - self._book_pushed.get(pair, 0.0) >= 0.25:
+                self._book_pushed[pair] = now
+                tops = {}
+                for vid, book in self.books.live(pair):
+                    bid, ask = book.best()
+                    tops[vid] = {"bid": bid, "ask": ask, "t": book.t}
+                _apiv1.push(self, "book", pair, {"t": now, "tops": tops})
+
+    def _on_liq(self, venue: str, pair: str, ts: float, px: float, usd: float, side: int) -> None:
+        if not self.liqs.add(venue, pair, ts, px, usd, side):
+            return
+        if self.streams:
+            _apiv1.push(self, "liquidations", pair, {"t": ts, "venue": venue, "px": px, "usd": usd, "side": side})
+        big = float(getattr(self.cfg, "liq_alert_usd", 0.0) or 0.0)
+        if big > 0 and usd >= big:
+            self.trace.emit("feed", f"liquidation: {'long' if side < 0 else 'short'} {usd:,.0f} USD {base_of(pair)} on {venue} at {px:,.6g}", "warn")
+            self.alerts.send("fill", f"liquidation: {'long' if side < 0 else 'short'} {usd:,.0f} USD {base_of(pair)} on {venue} at {px:,.6g}", key=pair)
+
+    def _on_perp_stats(self, venue: str, pair: str, ts, **fields) -> None:
+        self.perps.apply(venue, pair, ts, **fields)
+
+    def _quote_of(self, pair: str) -> str | None:
+        """The dollar class the pair's active provider quotes in, for the book reads."""
+        vid = (self.sources.active or {}).get(pair) if getattr(self, "sources", None) else None
+        src = self.sources.sources.get(vid) if vid else None
+        return getattr(src, "quote", None)
+
+    def candles(self, pair: str, tf: float = 300.0, n: int = 300, venues: set[str] | None = None, to: float | None = None) -> dict:
+        """What the chart draws: candles of `tf` seconds, from the tape when the timeframe is
+        inside the tape's reach (or a venue set is asked for), else the 5-minute bars resampled;
+        liquidations per candle, the model's resolved calls in the window, and the live forecast."""
+        tf = max(1.0, float(tf))
+        bar_s = float(self.cfg.bar_seconds)
+        to = time.time() if to is None else float(to)
+        end = (int(to // tf) + 1) * tf
+        start = end - n * tf
+        tape_reach = time.time() - self.tape.keep_s
+        source = "tape"
+        rows = self.tape.candles(pair, tf, n, venues=venues, to=to) if (venues or tf < bar_s or start >= tape_reach) else []
+        if not rows and not venues and tf >= bar_s:
+            source = "bars"
+            agg: dict[int, dict] = {}
+            for b in self.bars.get(pair, ()):
+                if b.ts < start or b.ts >= end or not b.close:
+                    continue
+                key = int((b.ts - start) // tf)
+                c = agg.get(key)
+                vb, vs = float(getattr(b, "buy_volume", 0.0) or 0.0) * b.close, float(getattr(b, "sell_volume", 0.0) or 0.0) * b.close
+                if c is None:
+                    agg[key] = {"t": start + key * tf, "o": b.open, "h": b.high, "l": b.low, "c": b.close, "v": b.volume, "vb": round(vb, 2), "vs": round(vs, 2), "n": b.trades}
+                else:
+                    c["h"] = max(c["h"], b.high); c["l"] = min(c["l"], b.low); c["c"] = b.close; c["v"] += b.volume; c["n"] += b.trades
+                    c["vb"] = round(c["vb"] + vb, 2); c["vs"] = round(c["vs"] + vs, 2)
+            rows = [agg[k] for k in sorted(agg)]
+        liq = self.liqs.per_bar(pair, tf, n, now=to) if getattr(self, "liqs", None) is not None else {}
+        calls = [{"t": float(o.get("t") or 0), "side": int(o.get("side") or 0), "q50": float(o.get("q50") or 0), "y": float(o.get("y") or 0),
+                  "hit": o.get("hit"), "pnl": float(o.get("pnl") or 0)} for o in (self.outcomes.get(pair) or []) if float(o.get("t") or 0) >= start]
+        L = self.latest.get(pair) or {}
+        pr = self.prices.get(pair) or {}
+        fc = {"t": float(pr.get("ts") or time.time()), "price": float(pr.get("price") or 0), "q": L.get("q"), "p_up": L.get("p_up"), "p_down": L.get("p_down"),
+              "action": L.get("action"), "horizon_s": float(self.cfg.horizon) * bar_s, "horizons": L.get("horizons"), "reasons": L.get("reasons")} if L.get("q") else None
+        fills = [{"t": float(f.get("t") or 0), "side": str(f.get("side") or ""), "price": float(f.get("price") or 0), "notional": float(f.get("notional") or 0), "note": f.get("note")}
+                 for f in list(getattr(self.paper, "trades", []) or []) if f.get("sym") == pair and start <= float(f.get("t") or 0) < end]
+        live = getattr(self, "live", None)
+        mirrors = []
+        for o in (list(getattr(live, "orders", []) or []) if live else []):
+            od = o.get("order") or {}
+            if od.get("symbol") != pair or not (start <= float(o.get("t") or 0) < end):
+                continue
+            px, pp = o.get("avg_price"), float(o.get("paper_price") or 0.0)
+            slip = round((float(px) / pp - 1.0) * 1e4 * (1 if od.get("side") == "buy" else -1), 2) if px and pp else None
+            mirrors.append({"t": float(o.get("t") or 0), "side": str(od.get("side") or ""), "price": px or (pp or None), "slippage_bps": slip, "ok": bool(o.get("ok")),
+                            "venue": o.get("venue"), "status": o.get("status"), "error": o.get("error")})
+        transfers = [{"sent": float(f.get("sent") or 0), "lands_at": float(f.get("lands_at") or 0), "amount": float(f.get("amount") or 0), "rail": f.get("rail"), "to": f.get("to"), "asset": f.get("asset")}
+                     for f in list(getattr(self.paper, "in_flight", []) or [])] + \
+                    [{"sent": float(f.get("sent") or 0), "lands_at": float(f.get("lands_at") or 0), "amount": float(f.get("amount") or 0), "rail": f.get("rail"), "to": f.get("to"), "asset": f.get("asset"), "landed": True}
+                     for f in list(getattr(self.paper, "transfers", []) or []) if f.get("event") == "landed" and float(f.get("sent") or 0) >= start]
+        return {"pair": pair, "tf": tf, "n": n, "source": source, "t0": start, "candles": rows, "liq": liq, "calls": calls, "forecast": fc, "fills": fills, "mirrors": mirrors,
+                "transfers": transfers, "venues": sorted(self.tape.venues), "quote": self._quote_of(pair), "t": time.time()}
+
+    def indicators_view(self) -> dict:
+        self.indicators.reload()
+        return {**self.indicators.catalog(), "files_source": self.indicators.files()}
+
+    def indicators_action(self, payload: dict) -> dict:
+        act = str(payload.get("action") or "")
+        if act == "save":
+            res = self.indicators.save(str(payload.get("file") or ""), str(payload.get("source") or ""))
+        elif act == "delete":
+            res = self.indicators.delete(str(payload.get("file") or ""))
+        elif act == "reload":
+            res = {"reloaded": self.indicators.reload(force=True)}
+        else:
+            res = {"error": f"unknown action {act!r}"}
+        return {**res, **self.indicators_view()}
+
+    def indicator_values(self, name: str, pair: str, n: int = 288, params: dict | None = None) -> dict:
+        """One indicator over a pair's last `n` bars (steel/indicators.py), cached ten seconds."""
+        self.indicators.reload()
+        bar_s = float(self.cfg.bar_seconds)
+        bars = list(self.bars.get(pair, ()))[-n:]
+        if not bars:
+            return {"name": name, "pair": pair, "error": "no bars yet"}
+        agg = self.perps.aggregate(pair)
+        ctx = _indicators.Context(pair, bars, cvd=self.tape.cvd(pair, bar_s, len(bars)), oi=self.perps.history.get(pair) or [],
+                                  liqs=self.liqs.per_bar(pair, bar_s, len(bars)), funding=agg["funding"] if agg else None,
+                                  book=self.books.bands(pair, quote=self.books.best_quote(pair, prefer=self._quote_of(pair))))
+        return self.indicators.run(name, ctx, params=params, cache_key=(pair, len(bars), float(bars[-1].ts)))
+
+    def markets_v1(self) -> dict:
+        """Every modeled pair with where it is served, for /api/v1/markets."""
+        bar_s = float(self.cfg.bar_seconds)
+        rows = []
+        active = self.sources.active or {}
+        kinds = {vid: getattr(src, "venue", "spot") for vid, src in self.sources.sources.items()}
+        for s in self.symbols:
+            bars = list(self.bars.get(s, ()))
+            px = float((self.prices.get(s) or {}).get("price") or (bars[-1].close if bars else 0.0) or 0.0)
+            vol24 = sum(float(b.volume or 0.0) * float(b.close or 0.0) for b in bars[-int(86400 / bar_s):])
+            v = active.get(s)
+            rows.append({"pair": s, "base": base_of(s), "venue": v, "kind": kinds.get(v, "spot") if v else None, "price": px, "vol_24h": round(vol24, 2),
+                         "bars": len(bars), "core": s in set(getattr(self, "core_symbols", ()) or ())})
+        return {"markets": rows, "n": len(rows), "trusted": bool(getattr(self.metrics, "trusted", False)), "bar_seconds": bar_s, "t": time.time()}
+
+    def forecast_v1(self, pair: str) -> dict:
+        """The model's latest call on one pair, as the dashboard sees it."""
+        L = self.latest.get(pair) or {}
+        return {"pair": pair, "trusted": bool(getattr(self.metrics, "trusted", False)), "horizon_s": float(self.cfg.bar_seconds) * int(getattr(self.cfg, "horizon", 12) or 12),
+                **{k: L.get(k) for k in ("action", "side", "size", "q", "p_up", "sigma_daily", "price", "ts", "horizons", "reasons", "edge_bps", "cost_bps")}, "t": time.time()}
+
+    def screener(self) -> dict:
+        """One row per pair from every stored series: price and the hour's change, the tape's
+        delta and prints, the aggregate open interest and its hour change, funding, the hour's
+        liquidations, the book's imbalance within 0.5%, the dislocation count, and the model's
+        call. Cached ten seconds."""
+        now = time.time()
+        cached = getattr(self, "_screener", None)
+        if cached and now - cached.get("t", 0) < 10:
+            return cached
+        bar_s = float(self.cfg.bar_seconds)
+        rows = []
+        hour = now - 3600.0
+        for s in self.symbols:
+            bars = list(self.bars.get(s, ()))
+            px = float((self.prices.get(s) or {}).get("price") or (bars[-1].close if bars else 0.0) or 0.0)
+            ago = next((b.close for b in reversed(bars) if b.ts <= now - 3600.0 and b.close), None)
+            chg = math.log(px / ago) * 1e4 if px and ago else None
+            tb = self.tape.bands(s, since=hour)
+            vol24 = sum(float(b.volume or 0.0) * float(b.close or 0.0) for b in bars[-int(86400 / bar_s):])
+            hist = self.perps.history.get(s) or []
+            oi_now = hist[-1][1] if hist and hist[-1][1] else None
+            oi_ago = next((r[1] for r in reversed(hist) if r[0] <= now - 3600.0 and r[1]), None)
+            agg = self.perps.aggregate(s)
+            lq = self.liqs.per_bar(s, 3600.0, 1, now=now)
+            bands = self.books.bands(s, quote=self.books.best_quote(s, prefer=self._quote_of(s)))
+            imb = next((b["imbalance"] for b in bands.get("bands", []) if b["pct"] == 0.5), None)
+            L = self.latest.get(s) or {}
+            rows.append({"pair": s, "base": base_of(s), "price": px, "chg_1h_bps": round(chg, 1) if chg is not None else None,
+                         "delta_1h": tb["delta"], "prints_1h": tb["n"], "buy_1h": tb["buy"], "sell_1h": tb["sell"], "vol_24h": round(vol24, 2),
+                         "oi_usd": oi_now, "oi_chg_1h": round(oi_now / oi_ago - 1, 4) if oi_now and oi_ago else None, "funding": agg["funding"] if agg else None,
+                         "liq_long_1h": lq.get("total_longs", 0.0), "liq_short_1h": lq.get("total_shorts", 0.0), "book_imb_05": imb,
+                         "dislocations": int(self.dislocations.count_for(s)) if hasattr(self.dislocations, "count_for") else None,
+                         "action": L.get("action"), "q50": (L.get("q") or [None] * 5)[2], "p_up": L.get("p_up"), "size": L.get("size"), "sigma": L.get("sigma_daily"),
+                         "venue": (self.sources.active or {}).get(s), "trusted": bool(getattr(self.metrics, "trusted", False))})
+        out = {"rows": rows, "t": now, "n": len(rows)}
+        self._screener = out
+        return out
+
+    def premium(self, pair: str, tf: float = 300.0, n: int = 288, reference: str = "binance") -> dict:
+        """Premiums per bar from the tape: each venue against the reference venue (Coinbase's
+        premium to Binance is the classic), and the perp venues' volume-weighted price against
+        the spot venues' (the basis the tape shows, in bps)."""
+        vw = self.tape.venue_vwap(pair, max(1.0, float(tf)), n)
+        venues = vw["venues"]
+        kinds = {vid: getattr(src, "venue", "spot") for vid, src in self.sources.sources.items()}
+        ref = venues.get(reference)
+        prem = {}
+        for v, ser in venues.items():
+            if v == reference or not ref:
+                continue
+            prem[v] = [round(math.log(a / b) * 1e4, 2) if a and b else None for a, b in zip(ser, ref)]
+        spot = [[ser[i] for v, ser in venues.items() if kinds.get(v, "spot") == "spot" and ser[i]] for i in range(vw["n"])]
+        perp = [[ser[i] for v, ser in venues.items() if kinds.get(v) == "perp" and ser[i]] for i in range(vw["n"])]
+        basis = [round(math.log((sum(p) / len(p)) / (sum(s) / len(s))) * 1e4, 2) if p and s else None for p, s in zip(perp, spot)]
+        return {"pair": pair, "t0": vw["t0"], "tf": vw["tf"], "n": vw["n"], "reference": reference, "premium_bps": prem, "basis_bps": basis,
+                "kinds": {v: kinds.get(v, "spot") for v in venues}, "t": time.time()}
+
+    def positioning(self, pair: str, n: int = 288, sensitivity: float | None = None) -> dict:
+        """Net positioning and absorption over the last `n` 5-minute bars (steel/positioning.py)."""
+        from . import positioning as _pos
+        bars = [{"t": b.ts, "o": b.open, "h": b.high, "l": b.low, "c": b.close, "buy": float(getattr(b, "buy_volume", 0.0) or 0.0) * b.close,
+                 "sell": float(getattr(b, "sell_volume", 0.0) or 0.0) * b.close} for b in list(self.bars.get(pair, ()))[-n:]]
+        oi = [(float(r[0]), float(r[1])) for r in self.perps.history.get(pair, []) if r[1]]
+        out = _pos.positioning(bars, oi, bar_s=float(self.cfg.bar_seconds), sensitivity=float(sensitivity if sensitivity is not None else getattr(self.cfg, "absorption_sensitivity", 50.0)))
+        out.update({"pair": pair, "tf": float(self.cfg.bar_seconds), "t": time.time()})
+        return out
+
+    def liqmap(self, pair: str, n: int = 288, bucket_bps: float = 10.0) -> dict:
+        """The modeled liquidation map over the last `n` 5-minute bars and the aggregated open
+        interest the perp feeds recorded per bar (steel/liqmap.py)."""
+        from . import liqmap as _lm
+        bars = [{"t": b.ts, "o": b.open, "h": b.high, "l": b.low, "c": b.close, "buy": float(getattr(b, "buy_volume", 0.0) or 0.0) * b.close,
+                 "sell": float(getattr(b, "sell_volume", 0.0) or 0.0) * b.close} for b in list(self.bars.get(pair, ()))[-n:]]
+        oi = [(float(r[0]), float(r[1])) for r in self.perps.history.get(pair, []) if r[1]]
+        out = _lm.liquidation_map(bars, oi, maintenance=float(self.fees["perp"].perp_maintenance or 0.005), bucket_bps=bucket_bps, keep_states=n,
+                                  bar_s=float(self.cfg.bar_seconds))
+        out["calibration"] = _lm.calibrate(out.get("states") or [], self.liqs.recent(pair, n=2000) if getattr(self, "liqs", None) is not None else [], out.get("bucket"),
+                                           mid=float(bars[-1]["c"]) if bars and bars[-1].get("c") else None)
+        out["method"] = out["calibration"]["method"]
+        out.update({"pair": pair, "tf": float(self.cfg.bar_seconds), "t": time.time()})
+        return out
+
+    def heatmap(self, pair: str, tf: float = 300.0, n: int = 120, bucket_bps: float = 5.0, quote: str | None = None, to: float | None = None) -> dict:
+        q = (str(quote).upper() if quote else None) or self.books.best_quote(pair, prefer=self._quote_of(pair))
+        hm = self.books.heatmap(pair, max(1.0, float(tf)), n, bucket_bps=bucket_bps, quote=q, to=to)
+        hm["history_s"] = self.books.history_s
+        out = hm
+        out["method"] = ("mean resting USD per price row per column, from the level snapshots the venues' depth feeds showed every "
+                         f"{float(getattr(self.cfg, 'book_history_s', 15.0) or 15.0):g} s (the top {int(getattr(self.cfg, 'book_levels', 40) or 40)} levels a side, one dollar class); "
+                         "what rested, not what would fill")
+        return out
+
+    def levels(self, pair: str, days: int = 35) -> dict:
+        """Period levels from the replay's 5-minute closes: today's open and the developing
+        high/low; yesterday's open, high, low, close and equilibrium; this week's and last
+        week's; this month's and last month's. Closes, not ticks: the highs and lows are of
+        5-minute closes, which the labels say."""
+        import datetime as _dt
+        L = self.learner
+        try:
+            j = self.symbols.index(pair)
+            n = int(L.size)
+            t = np.asarray(L.store.t[:n], dtype=np.float64)
+            c = np.asarray(L.store.close[:n, j], dtype=np.float64)
+        except (ValueError, AttributeError, IndexError):
+            return {"pair": pair, "levels": [], "note": "no replay for this pair"}
+        now = time.time()
+        m = (t >= now - days * 86400.0) & (c > 0)
+        t, c = t[m], c[m]
+        if not len(t):
+            return {"pair": pair, "levels": [], "note": "no closes in the window"}
+        order = np.argsort(t)
+        t, c = t[order], c[order]
+        days_k = (t // 86400).astype(np.int64)
+        today = int(now // 86400)
+        week_k = ((t + 3 * 86400) // (7 * 86400)).astype(np.int64)                      # weeks starting Monday 00:00 UTC
+        this_week = int((now + 3 * 86400) // (7 * 86400))
+        ym = lambda x: (lambda d: d.year * 12 + d.month)(_dt.datetime.fromtimestamp(float(x), tz=_dt.timezone.utc))
+        months = np.array([ym(x) for x in t])
+        this_month = ym(now)
+        def period(mask):
+            cc = c[mask]
+            return {"o": float(cc[0]), "h": float(cc.max()), "l": float(cc.min()), "c": float(cc[-1])} if len(cc) else None
+        out = []
+        def add(name, label, v, kind):
+            if v is not None:
+                out.append({"id": name, "label": label, "px": round(float(v), 10), "kind": kind})
+        d0, d1 = period(days_k == today), period(days_k == today - 1)
+        w0, w1 = period(week_k == this_week), period(week_k == this_week - 1)
+        m0, m1 = period(months == this_month), period(months == this_month - 1)
+        if d0: add("do", "day open", d0["o"], "day"); add("dh", "day high", d0["h"], "day"); add("dl", "day low", d0["l"], "day")
+        if d1: add("pdh", "prev day high", d1["h"], "prev"); add("pdl", "prev day low", d1["l"], "prev"); add("pdc", "prev day close", d1["c"], "prev"); add("pdeq", "prev day eq", (d1["h"] + d1["l"]) / 2, "prev")
+        if w0: add("wo", "week open", w0["o"], "week"); add("wh", "week high", w0["h"], "week"); add("wl", "week low", w0["l"], "week")
+        if w1: add("pwh", "prev week high", w1["h"], "week"); add("pwl", "prev week low", w1["l"], "week")
+        if m0: add("mo", "month open", m0["o"], "month"); add("mh", "month high", m0["h"], "month"); add("ml", "month low", m0["l"], "month")
+        if m1: add("pmh", "prev month high", m1["h"], "month"); add("pml", "prev month low", m1["l"], "month")
+        return {"pair": pair, "levels": out, "note": "from 5-minute closes", "bars": int(len(t)), "t": now}
+
+    def footprint(self, pair: str, tf: float = 300.0, n: int = 120, bucket_bps: float = 2.0, venues: set[str] | None = None, to: float | None = None,
+                  bubble_usd: float | None = None) -> dict:
+        """The footprint over the tape for the chart, with the per-bar liquidations and the bar's
+        book bands when the bar store kept them."""
+        bubble = float(bubble_usd if bubble_usd is not None else getattr(self.cfg, "bubble_usd", 100_000.0) or 0.0)
+        fp = self.tape.footprint(pair, max(1.0, float(tf)), n, bucket_bps=bucket_bps, venues=venues, to=to, bubble_usd=bubble)
+        liq = self.liqs.per_bar(pair, max(1.0, float(tf)), n, now=to) if getattr(self, "liqs", None) is not None else {}
+        by_t = {}
+        if liq and liq.get("longs"):
+            for i, (lg, sh) in enumerate(zip(liq["longs"], liq["shorts"])):
+                by_t[liq["t0"] + i * liq["bar_s"]] = (lg, sh)
+        for c in fp["candles"]:
+            lg, sh = by_t.get(c["t"], (0.0, 0.0))
+            c["liq_long"], c["liq_short"] = lg, sh
+        imbs = {row[0]: row for row in self.books.imb.get(pair, [])}
+        for c in fp["candles"]:
+            row = imbs.get(round(c["t"] + float(tf)))
+            if row:
+                c["ob_imb_05"], c["ob_depth_1"] = row[1], row[4]
+        fp["bubble_usd"] = bubble
+        fp["t"] = time.time()
+        return fp
+
+    def derivs_view(self, pair: str, bars: int = 72) -> dict:
+        """What the dashboard's derivatives panel shows: per-venue OI, funding, mark and index, the
+        aggregate, the per-bar history, and the liquidations (recent and per bar)."""
+        bar_s = float(self.cfg.bar_seconds)
+        return {"pair": pair, "venues": self.perps.venues(pair), "aggregate": self.perps.aggregate(pair), "history": list(self.perps.history.get(pair, []))[-288:],
+                "liquidations": {"recent": self.liqs.recent(pair, n=30), "per_bar": self.liqs.per_bar(pair, bar_s, bars)},
+                "feeds": self.derivs.status(), "status": {"liqs": self.liqs.status(), "perps": self.perps.status()}, "t": time.time()}
+
+    def book_view(self, pair: str, n: int = 16, bucket_bps: float = 0.0, quote: str | None = None) -> dict:
+        """What the dashboard's order-book panel shows: the aggregate ladder, the depth bands per
+        venue and in all, and the per-bar imbalance history."""
+        quote = (str(quote).upper() if quote else None) or self.books.best_quote(pair, prefer=self._quote_of(pair))
+        return {"pair": pair, "quote": quote, "quotes": self.books.quotes(pair), "ladder": self.books.ladder(pair, n=n, bucket_bps=bucket_bps, quote=quote),
+                "bands": self.books.bands(pair, quote=quote), "history": list(self.books.imb.get(pair, []))[-288:], "status": self.books.status(), "t": time.time()}
+
+    def tape_view(self, pair: str, *, n: int = 50, min_usd: float = 0.0, since: float | None = None, bars: int = 60) -> dict:
+        """What the dashboard's tape panel shows: the last prints, the size-band volumes over the
+        hour, and the per-bar delta and CVD over the last `bars` bars."""
+        hour = time.time() - 3600.0
+        return {"pair": pair, "recent": self.tape.recent(pair, n=n, min_usd=min_usd, since=since), "bands": self.tape.bands(pair, since=hour),
+                "cvd": self.tape.cvd(pair, float(self.cfg.bar_seconds), bars), "status": self.tape.status(), "t": time.time()}
 
     def _on_tick(self, t: Tick, live: bool) -> None:
         p = self.prices.get(t.symbol)
@@ -2155,6 +2663,25 @@ class Engine:
         self.trace.emit("bars", f"#{self.bar_index} " + " | ".join(parts))
 
         matured = self._mature(closes, real_now)
+        bar_s = float(cfg.bar_seconds)
+        self.features.event_hours = _calendar.event_hours(self.events, ts)
+        for s in self.symbols:
+            self.features.set_book(s, self.books.features(s, quote=self._quote_of(s)))
+            self.books.mark(s, ts)
+            longs, shorts = self.liqs.last_bar(s, bar_s, now=ts + 1.0)
+            hist = self.perps.history.get(s) or []
+            prev_oi = float(hist[-1][1]) if hist and hist[-1][1] else None
+            self.perps.mark(s, ts)
+            hist = self.perps.history.get(s) or []
+            cur_oi = float(hist[-1][1]) if hist and hist[-1][1] else None
+            d_oi = (cur_oi - prev_oi) if (cur_oi is not None and prev_oi is not None) else 0.0
+            b = row[s]
+            bv, sv_ = float(getattr(b, "buy_volume", 0.0) or 0.0), float(getattr(b, "sell_volume", 0.0) or 0.0)
+            share = bv / (bv + sv_) if bv + sv_ > 0 else 0.5
+            self.features.set_flow(s, {"liq_long": longs, "liq_short": shorts, "pos_long": max(0.0, d_oi) * share, "pos_short": max(0.0, d_oi) * (1 - share)})
+            agg = self.perps.aggregate(s)
+            if agg and agg.get("funding") is not None:
+                self.funding[s] = float(agg["funding"])                  # the live, OI-weighted rate across the perp venues
         x = self.features.push(row)
 
         if x is not None:
@@ -2830,7 +3357,7 @@ class Engine:
                 try:
                     await self.identity.refresh()
                     st = self.identity.status()
-                    self.trace.emit("system", f"identity: {st['symbols']} symbols known, {st['ambiguous']} shared by several coins"
+                    self.trace.emit("system", f"identity: {st['symbols']} tickers known, {st['ambiguous']} shared by several coins"
                                               + (f" ({st['error']})" if st["error"] else ""), "warn" if st["error"] else "info")
                     self._publish({"type": "identity", "identity": self.identity_view()})
                 except Exception as e:  # noqa: BLE001

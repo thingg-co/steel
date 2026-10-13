@@ -19,7 +19,7 @@ def at(y, m, d, hh=0, mm=0):
 
 
 def test_calendar_features_are_bounded_and_mean_what_they_say():
-    assert FEATURES[-len(CALENDAR):] == list(CALENDAR) and N_FEATURES == 9 + 13 + 7 and not NORMALIZE[-len(CALENDAR):].any()
+    assert FEATURES[-len(CALENDAR):] == list(CALENDAR) and N_FEATURES == 9 + 13 + 4 + 4 + 2 + 1 + 7 and not NORMALIZE[-len(CALENDAR):].any()
     v = dict(zip(CALENDAR, calendar_features(at(2026, 10, 11, 0, 0))))        # a Sunday midnight UTC
     assert v["hour_sin"] == pytest.approx(0.0) and v["hour_cos"] == pytest.approx(1.0)
     assert v["to_funding"] == pytest.approx(1.0) and v["cme_open"] == 0.0 and v["expiry"] == 0.0

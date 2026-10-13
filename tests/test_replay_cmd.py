@@ -262,5 +262,5 @@ class TestReplayCmd:
         output = f.getvalue()
         # Current symbols should include C from universe.json
         # cfg.symbols is ["A-USD", "B-USD"], universe adds ["C-USD"] = 3 total
-        assert "current symbols: 3" in output, f"Expected 3 symbols (2 + C from universe.json), got: {output}"
+        assert "current pairs: 3" in output, f"Expected 3 pairs (2 + C from universe.json), got: {output}"
         assert "would load checkpoint" in output, f"Should report config match, got: {output}"

@@ -338,3 +338,33 @@ def test_the_simulator_never_speaks_for_a_name_a_live_venue_lists():
     solo = SourceManager(cfg(sources_on="sim"), ["BTC-USD"], on_tick=got.append)
     solo._route("sim", Tick("BTC-USD", now, 60000.0, 1.0, True))
     assert got[-1].price == 60000.0 and solo.provider_for("BTC-USD") == "sim"
+
+
+
+def test_simulator_toggle_is_remembered(tmp_path):
+    """The simulator starts on as the fallback, but an operator who switched it off stays
+    heard across restarts, like any other venue."""
+    import json
+    m = SourceManager(cfg(symbols=["BTC-USD"]), ["BTC-USD"], on_tick=lambda t: None, state_path=tmp_path / "sources.json")
+    assert m.enabled["sim"]
+    m.enabled["sim"] = False
+    m._save()
+    assert json.loads((tmp_path / "sources.json").read_text())["enabled"]["sim"] is False
+    again = SourceManager(cfg(symbols=["BTC-USD"]), ["BTC-USD"], on_tick=lambda t: None, state_path=tmp_path / "sources.json")
+    assert not again.enabled["sim"] and again.enabled["coinbase"]
+
+
+
+def test_bybit_subscribes_only_listed_pairs():
+    """Bybit refuses a whole subscribe message over one unlisted pair (`Invalid symbol
+    :[orderbook.50.AKTUSDT]` on the LAN run), so the stream asks only for pairs on its
+    instrument list, one topic per message; with no list it asks for everything."""
+    y = BybitSource(cfg(), ["BTC-USD", "AKT-USD", "ETH-USD"])
+    y.books = True
+    topics = y.subscriptions({"BTC-USD", "ETH-USD"})
+    assert topics == ["publicTrade.BTCUSDT", "publicTrade.ETHUSDT", "orderbook.50.BTCUSDT", "orderbook.50.ETHUSDT"] and "AKTUSDT" not in y._pairs
+    assert len(y.subscriptions(set())) == 6 and "AKTUSDT" in y._pairs
+    y.products = {"BTC-USD"}
+    assert y.knows("BTC-USD") and not y.knows("AKT-USD")
+    y._handle({"success": False, "ret_msg": "Invalid symbol :[orderbook.50.AKTUSDT]", "op": "subscribe"}, lambda t: None)
+    assert y.note.startswith("ws: Invalid symbol")

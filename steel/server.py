@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import mimetypes
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -15,6 +16,7 @@ from .engine import Engine, clean
 
 log = logging.getLogger(__name__)
 WEB = Path(__file__).resolve().parent.parent / "web"
+DOCS = Path(__file__).resolve().parent.parent / "docs"
 
 
 def create_app(engine: Engine) -> FastAPI:
@@ -49,7 +51,12 @@ def create_app(engine: Engine) -> FastAPI:
     # A phone or a second machine on the LAN may open the dashboard or probe /api/state
     # from another origin. The server is LAN-only and read-only over HTTP, so a wildcard is fine.
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+    mimetypes.add_type("application/manifest+json", ".webmanifest")   # the web-app manifest a phone installs from
     app.mount("/static", StaticFiles(directory=WEB), name="static")
+    if DOCS.is_dir():
+        app.mount("/docs", StaticFiles(directory=DOCS, html=True), name="docs")   # the whitepaper and the design notes, from the box itself
+    from .apiv1 import make_router
+    app.include_router(make_router(engine))                 # the versioned data API (M24)
 
     @app.get("/")
     async def index():
@@ -111,6 +118,35 @@ def create_app(engine: Engine) -> FastAPI:
     async def handoff():
         return JSONResponse(clean(engine.handoff.status()))
 
+    @app.get("/api/indicators")
+    async def indicators():
+        return JSONResponse(clean(engine.indicators_view()))
+
+    @app.post("/api/indicators")
+    async def indicators_action(payload: dict):
+        return JSONResponse(clean(engine.indicators_action(payload)))
+
+    @app.get("/api/indicator/{name}/{sym}")
+    async def indicator_values(name: str, sym: str, n: int = 288):
+        from .config import canonical
+        return JSONResponse(clean(engine.indicator_values(name, canonical(sym), n=min(max(10, n), 2000))))
+
+    @app.get("/api/algo")
+    async def algo_status():
+        return JSONResponse(clean(engine.algo_status()))
+
+    @app.post("/api/algo")
+    async def algo_action(payload: dict):
+        return JSONResponse(clean(engine.algo_action(payload)))
+
+    @app.get("/api/rules")
+    async def rules():
+        return JSONResponse(clean(engine.rules_status()))
+
+    @app.post("/api/rules")
+    async def rules_action(payload: dict):
+        return JSONResponse(clean(engine.rules_action(payload)))
+
     @app.post("/api/handoff")
     async def handoff_action(payload: dict):
         return JSONResponse(clean(engine.handoff_action(payload)))
@@ -136,6 +172,74 @@ def create_app(engine: Engine) -> FastAPI:
     async def ticket(sym: str):
         from .config import canonical
         return JSONResponse(clean(engine.ticket(canonical(sym))))
+
+    @app.get("/api/premium")
+    async def premium(pair: str, tf: float = 300.0, n: int = 288, reference: str = "binance"):
+        from .config import canonical
+        return JSONResponse(clean(await asyncio.to_thread(engine.premium, canonical(pair), tf, max(2, min(2000, n)), reference.lower())))
+
+    @app.get("/api/calendar")
+    async def calendar():
+        return JSONResponse(clean(engine.calendar_view()))
+
+    @app.get("/api/predictions")
+    async def predictions():
+        return JSONResponse(clean(engine.predictions_view()))
+
+    @app.get("/api/screener")
+    async def screener():
+        return JSONResponse(clean(await asyncio.to_thread(engine.screener)))
+
+    @app.get("/api/options")
+    async def options(asset: str = "BTC"):
+        return JSONResponse(clean(engine.options_view(asset)))
+
+    @app.get("/api/positioning")
+    async def positioning(pair: str, n: int = 288, sensitivity: float | None = None):
+        from .config import canonical
+        return JSONResponse(clean(await asyncio.to_thread(engine.positioning, canonical(pair), max(12, min(2000, n)), sensitivity)))
+
+    @app.get("/api/liqmap")
+    async def liqmap(pair: str, n: int = 288, bucket_bps: float = 10.0):
+        from .config import canonical
+        return JSONResponse(clean(await asyncio.to_thread(engine.liqmap, canonical(pair), max(12, min(2000, n)), max(1.0, bucket_bps))))
+
+    @app.get("/api/heatmap")
+    async def heatmap(pair: str, tf: float = 300.0, n: int = 120, bucket_bps: float = 5.0, quote: str = "", to: float | None = None):
+        from .config import canonical
+        return JSONResponse(clean(await asyncio.to_thread(engine.heatmap, canonical(pair), tf, max(1, min(600, n)), max(0.5, bucket_bps), quote or None, to)))
+
+    @app.get("/api/levels")
+    async def levels(pair: str, days: int = 35):
+        from .config import canonical
+        return JSONResponse(clean(await asyncio.to_thread(engine.levels, canonical(pair), max(3, min(400, days)))))
+
+    @app.get("/api/footprint")
+    async def footprint(pair: str, tf: float = 300.0, n: int = 120, bucket_bps: float = 2.0, venues: str = "", to: float | None = None, bubble_usd: float | None = None):
+        from .config import canonical
+        vs = {v.strip().lower() for v in venues.split(",") if v.strip()} or None
+        return JSONResponse(clean(await asyncio.to_thread(engine.footprint, canonical(pair), tf, max(1, min(600, n)), max(0.1, bucket_bps), vs, to, bubble_usd)))
+
+    @app.get("/api/candles")
+    async def candles(pair: str, tf: float = 300.0, n: int = 300, venues: str = "", to: float | None = None):
+        from .config import canonical
+        vs = {v.strip().lower() for v in venues.split(",") if v.strip()} or None
+        return JSONResponse(clean(engine.candles(canonical(pair), tf=tf, n=max(2, min(3000, n)), venues=vs, to=to)))
+
+    @app.get("/api/derivs")
+    async def derivs(pair: str, bars: int = 72):
+        from .config import canonical
+        return JSONResponse(clean(engine.derivs_view(canonical(pair), bars=max(1, min(600, bars)))))
+
+    @app.get("/api/book")
+    async def book(pair: str, n: int = 16, bucket_bps: float = 0.0, quote: str = ""):
+        from .config import canonical
+        return JSONResponse(clean(engine.book_view(canonical(pair), n=max(1, min(100, n)), bucket_bps=max(0.0, bucket_bps), quote=quote or None)))
+
+    @app.get("/api/tape")
+    async def tape(pair: str, n: int = 50, min_usd: float = 0.0, since: float | None = None, bars: int = 60):
+        from .config import canonical
+        return JSONResponse(clean(engine.tape_view(canonical(pair), n=max(1, min(512, n)), min_usd=min_usd, since=since, bars=max(1, min(600, bars)))))
 
     @app.get("/api/alerts")
     async def alerts():

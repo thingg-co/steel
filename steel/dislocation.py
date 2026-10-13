@@ -22,13 +22,18 @@ from pathlib import Path
 
 class DislocationMonitor:
     def __init__(self, taker_bps, *, min_edge_bps: float = 0.0, latency_bps: float = 0.0, stale_s: float = 10.0,
-                 log_path: str | Path | None = None, keep: int = 500):
-        """`taker_bps(venue) -> float`: the taker fee of a venue, per leg."""
+                 log_path: str | Path | None = None, keep: int = 500, max_gap_bps: float = 500.0):
+        """`taker_bps(venue) -> float`: the taker fee of a venue, per leg. `max_gap_bps`: a gross gap
+        beyond it is not a dislocation but a quote that is not this asset (a venue's symbol that
+        names another coin or unit) or a broken book; it is counted as suspect and never opens."""
         self.taker_bps = taker_bps
         self.min_edge_bps = float(min_edge_bps)
+        self.max_gap_bps = float(max_gap_bps)
+        self.suspect: dict[str, int] = {}                  # venue -> quotes refused for an impossible gap
         self.latency_bps = float(latency_bps)
         self.stale_s = float(stale_s)
         self.log_path = Path(log_path) if log_path else None
+        self.per_sym: dict[str, int] = {}                  # closed episodes per pair, for the screener
         self.books: dict[str, dict[str, dict]] = {}        # sym -> venue -> {bid, ask, bid_size, ask_size, ts, quote, kind}
         self.open: dict[tuple, dict] = {}                   # (sym, quote, kind) -> the episode in progress
         self.episodes: deque = deque(maxlen=keep)           # closed episodes, newest last
@@ -80,6 +85,14 @@ class DislocationMonitor:
             _, bid_v, bid_q, ask_v, ask_q = max(cand, key=lambda c: c[0])
         mid = (bid_q["bid"] + ask_q["ask"]) / 2.0
         gross = (bid_q["bid"] - ask_q["ask"]) / mid * 1e4
+        if self.max_gap_bps and gross > self.max_gap_bps:
+            # which leg is off: the one further from the other books' midpoints (or, with two books, both are suspect)
+            others = [(v, (q["bid"] + q["ask"]) / 2.0) for v, q in books if v not in (bid_v, ask_v)]
+            ref = sorted(m for _, m in others)[len(others) // 2] if others else None
+            for v, q in ((bid_v, bid_q), (ask_v, ask_q)):
+                if ref is None or abs((q["bid"] + q["ask"]) / 2.0 / ref - 1.0) * 1e4 > self.max_gap_bps / 2:
+                    self.suspect[v] = self.suspect.get(v, 0) + 1
+            return self._close(key, now)
         fees = float(self.taker_bps(ask_v)) + float(self.taker_bps(bid_v))
         net = gross - fees - self.latency_bps
         if net <= self.min_edge_bps:
@@ -118,6 +131,7 @@ class DislocationMonitor:
                "samples": ep["samples"], "size_usd": round(ep["size_usd"], 2) if ep.get("size_usd") is not None else None}
         self.episodes.append(rec)
         self.n_total += 1
+        self.per_sym[rec['sym']] = self.per_sym.get(rec['sym'], 0) + 1
         if self.on_close:
             try:
                 self.on_close(rec)
@@ -131,6 +145,9 @@ class DislocationMonitor:
             except OSError:
                 pass
         return rec
+
+    def count_for(self, sym: str) -> int:
+        return int(self.per_sym.get(sym, 0))
 
     def sweep(self, now: float | None = None) -> list[dict]:
         """Close every open episode whose quotes have gone stale (the stream stopped mid-gap)."""
@@ -163,6 +180,6 @@ class DislocationMonitor:
         now = time.time()
         opened = [{**ep, "window_ms": int(round((now - ep["start"]) * 1000)), "mean_bps": round(ep["sum_bps"] / max(1, ep["samples"]), 2)}
                   for ep in self.open.values()]
-        return {"t": now, "total": self.n_total, "kept": len(eps), "checks": self.checks, "overall": summary(eps),
+        return {"t": now, "total": self.n_total, "kept": len(eps), "checks": self.checks, "overall": summary(eps), "suspect": dict(self.suspect), "max_gap_bps": self.max_gap_bps,
                 "pairs": dict(top), "open": sorted(opened, key=lambda e: -e["peak_bps"])[:20],
                 "recent": list(reversed(eps[-last:])), "venues": sorted({v for b in self.books.values() for v in b})}

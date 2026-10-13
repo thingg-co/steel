@@ -66,10 +66,35 @@ class HyperliquidAccount(Account):
                 out.append({"asset": self.asset(coin), "qty": total, "hold": fnum(b.get("hold")) * factor, "id": acct})
         return out
 
+    def parse_subaccounts(self, subs: list, vaults: list) -> list[dict]:
+        """`subAccounts` answers each subaccount's name with its perp and spot states; the rows
+        carry `<address>/<name>`. `userVaultEquities` is the address's equity in each vault,
+        reported as USDC under `<address> vault`."""
+        acct = mask(self.address)
+        out: list[dict] = []
+        for sub in subs or []:
+            name = str(sub.get("name") or "sub")
+            rows = self.parse(sub.get("clearinghouseState") or {}, sub.get("spotState") or {})
+            for r in rows:
+                r["id"] = f"{acct}/{name}"
+            out.extend(rows)
+        for v in vaults or []:
+            eq = fnum(v.get("equity"))
+            if eq > 0:
+                out.append({"asset": "USDC", "qty": eq, "hold": eq, "id": f"{acct} vault {str(v.get('vaultAddress') or '')[:6]}"})
+        return out
+
     async def balances(self) -> list[dict]:
         perp = await self._json("POST", f"{HOST}{INFO}", json={"type": "clearinghouseState", "user": self.address})
         spot = await self._json("POST", f"{HOST}{INFO}", json={"type": "spotClearinghouseState", "user": self.address})
-        return self.parse(perp or {}, spot or {})
+        out = self.parse(perp or {}, spot or {})
+        subs = vaults = None
+        try:
+            subs = await self._json("POST", f"{HOST}{INFO}", json={"type": "subAccounts", "user": self.address})
+            vaults = await self._json("POST", f"{HOST}{INFO}", json={"type": "userVaultEquities", "user": self.address})
+        except Exception:  # noqa: BLE001  (an address without subaccounts answers null; anything else is not a reason to drop the main account)
+            pass
+        return out + self.parse_subaccounts(subs if isinstance(subs, list) else [], vaults if isinstance(vaults, list) else [])
 
     async def fees(self) -> dict | None:
         """`userFees`: the address's effective rates after its volume tier and discounts,

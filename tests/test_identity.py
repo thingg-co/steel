@@ -40,7 +40,7 @@ def test_ambiguity_resolution_and_labels(tmp_path):
 
 
 def test_monitor_pairs_ambiguous_names_only_on_matching_identity():
-    m = DislocationMonitor(lambda v: 5.0)
+    m = DislocationMonitor(lambda v: 5.0, max_gap_bps=0.0)        # the test's gaps are wide on purpose; the wrong-quote gate is off here
     t = 1_791_000_000.0
     m.update("NIGHT-USD", "htx", 1.00, 1.01, t, quote="USDT", identity=None, ambiguous=True)
     m.update("NIGHT-USD", "okx", 1.50, 1.51, t, quote="USDT", identity=None, ambiguous=True)         # a 50% "gap" between two unknown tokens: no episode
@@ -48,7 +48,7 @@ def test_monitor_pairs_ambiguous_names_only_on_matching_identity():
     m.update("NIGHT-USD", "coinbase", 1.00, 1.01, t, quote="USD", identity="midnight", ambiguous=True)
     m.update("NIGHT-USD", "kraken", 1.30, 1.31, t, quote="USD", identity="midnight", ambiguous=True)  # both resolved to the same coin: a real gap
     assert ("NIGHT-USD", "USD", "spot") in m.open
-    m2 = DislocationMonitor(lambda v: 5.0)
+    m2 = DislocationMonitor(lambda v: 5.0, max_gap_bps=0.0)
     m2.update("NIGHT-USD", "coinbase", 1.00, 1.01, t, quote="USD", identity="midnight", ambiguous=True)
     m2.update("NIGHT-USD", "kraken", 1.30, 1.31, t, quote="USD", identity="night-coin", ambiguous=True)   # different coins: nothing
     assert not m2.open

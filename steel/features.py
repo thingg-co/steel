@@ -16,8 +16,12 @@ from .clock import CALENDAR, calendar_features
 # standardization untouched.
 EXOGENOUS = ["news_sent", "news_attn", "social_sent", "social_attn", "fng", "funding", "oi_chg", "longshort", "basis", "dvol", "btc_dom", "breadth", "stable_flow"]
 MICRO = ["ret", "range", "logvol", "imbalance", "spread", "logtrades", "closepos", "mom", "rvol"]
-FEATURES = MICRO + EXOGENOUS + list(CALENDAR)
-NORMALIZE = np.array([1, 1, 1, 0, 1, 1, 0, 1, 1] + [0] * (len(EXOGENOUS) + len(CALENDAR)), dtype=bool)
+BOOK = ["ob_imb_05", "ob_imb_2", "ob_imb_10", "ob_depth_1"]   # resting-book imbalance within 0.5%, 2%, 10% of mid; log USD depth within 1% (steel/book.py)
+FLOW = ["liq_long", "liq_short", "pos_long", "pos_short"]     # log USD of longs and shorts liquidated in the bar; of new longs and new shorts opened (OI-confirmed) (steel/derivs.py, steel/positioning.py)
+OPTIONS = ["gex_norm", "iv_atm"]                                 # dealer gamma as a share of the chain's notional, the nearest ATM implied vol (BTC and ETH pairs; 0 elsewhere) (steel/options.py)
+EVENTS = ["event_hours"]                                          # hours to the next high-impact scheduled event over 72 (steel/calendar.py), same for every pair
+FEATURES = MICRO + EXOGENOUS + BOOK + FLOW + OPTIONS + EVENTS + list(CALENDAR)
+NORMALIZE = np.array([1, 1, 1, 0, 1, 1, 0, 1, 1] + [0] * len(EXOGENOUS) + [0, 0, 0, 1] + [1, 1, 1, 1] + [0, 1] + [0] + [0] * len(CALENDAR), dtype=bool)
 N_FEATURES = len(FEATURES)
 
 
@@ -98,6 +102,10 @@ class FeatureBuilder:
         # exogenous signal slots (everything after news), held constant between refreshes
         self.exo_keys = EXOGENOUS[2:]
         self.exo: dict[str, dict[str, float]] = {s: {k: 0.0 for k in self.exo_keys} for s in symbols}
+        self.book: dict[str, dict[str, float]] = {s: {k: 0.0 for k in BOOK} for s in symbols}   # the live book's bands, set before each push
+        self.flow: dict[str, dict[str, float]] = {s: {k: 0.0 for k in FLOW} for s in symbols}   # the bar's liquidations, set before each push
+        self.opt: dict[str, dict[str, float]] = {s: {k: 0.0 for k in OPTIONS} for s in symbols}  # the options read for the pair's asset, held between refreshes
+        self.event_hours = 1.0                                                                   # set before each push from the calendar
 
     def set_news(self, symbol: str, sentiment: float, attention: float) -> None:
         """Exogenous news state, held constant until the next skim."""
@@ -109,6 +117,29 @@ class FeatureBuilder:
         for k in self.exo_keys:
             if k in values and values[k] is not None:
                 cur[k] = float(np.clip(values[k], -1, 1))
+
+    def set_book(self, symbol: str, values: dict | None) -> None:
+        """The order book's bands for the bar about to be pushed (None keeps the last reading)."""
+        if not values:
+            return
+        cur = self.book[symbol]
+        for k in BOOK:
+            if values.get(k) is not None:
+                cur[k] = float(values[k])
+
+    def set_flow(self, symbol: str, values: dict | None) -> None:
+        """The bar's liquidations (USD), stored as log1p; a bar with none is zero."""
+        cur = self.flow[symbol]
+        for k in FLOW:
+            cur[k] = math.log1p(max(0.0, float((values or {}).get(k) or 0.0)))
+
+    def set_options(self, symbol: str, values: dict | None) -> None:
+        if not values:
+            return
+        cur = self.opt[symbol]
+        for k in OPTIONS:
+            if values.get(k) is not None:
+                cur[k] = float(values[k])
 
     def push(self, row: dict[str, Bar]) -> np.ndarray | None:
         """Add one bar row. Returns the (assets, window, features) input once the window is full."""
@@ -130,8 +161,9 @@ class FeatureBuilder:
             rvol = float(np.std(r)) if len(r) >= 2 else 0.0
             sent, attn = self.news[s]
             ex = self.exo[s]
+            bk, fl, op = self.book[s], self.flow[s], self.opt[s]
             raw[i] = [ret, rng, math.log1p(b.volume), imb, spread, math.log1p(b.trades), closepos, mom, rvol,
-                      sent, attn] + [ex[k] for k in self.exo_keys] + cal
+                      sent, attn] + [ex[k] for k in self.exo_keys] + [bk[k] for k in BOOK] + [fl[k] for k in FLOW] + [op[k] for k in OPTIONS] + [self.event_hours] + cal
             self.prev_close[s] = b.close
         self.norm.update(raw)
         self.window.append(self.norm.apply(raw))

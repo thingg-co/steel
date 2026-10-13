@@ -28,7 +28,7 @@ SERVICE = {"id": "alerts", "name": "Alerts", "file": "alerts.json", "kind": "jso
 
 # seconds between two alerts of one kind for one key (0 = never throttled)
 THROTTLE = {"error": 0.0, "kill": 0.0, "live": 0.0, "demoted": 0.0, "unhedged": 0.0, "refused": 300.0,
-            "fill": 0.0, "signal": 1800.0, "stall": 3600.0, "venue": 1800.0, "vault": 86400.0, "warn": 600.0, "info": 600.0}
+            "fill": 0.0, "rule": 0.0, "signal": 1800.0, "stall": 3600.0, "venue": 1800.0, "vault": 86400.0, "warn": 600.0, "info": 600.0}
 FIELDS = [f["id"] for f in SERVICE["fields"]]
 
 

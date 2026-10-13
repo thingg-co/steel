@@ -70,12 +70,16 @@ and `steel check` names `flint-run.service` (and any `llama-server@*`) when a st
   attention, Reddit tone and attention, Fear & Greed, funding, open-interest change, long/short
   ratio, basis, DVOL, BTC dominance, breadth, stablecoin flow) and 7 calendar ones
   (`clock.CALENDAR`: hour and day-of-week angles, the funding clock, the CME session, the
-  Friday options expiry; a function of the bar's timestamp): 29 in all. A feature-set change
+  Friday options expiry; a function of the bar's timestamp), 4 order-book ones (`features.BOOK`: the
+  0.5%, 2% and 10% depth imbalances and the depth within 1%), 4 flow ones (`features.FLOW`:
+  liquidations and new positioning by side, log-scaled), 2 options ones (`features.OPTIONS`: BTC and
+  ETH only, GEX normalized and ATM IV) and the event clock (`features.EVENTS`: hours to the next
+  high-impact calendar event over 72): 40 in all. A feature-set change
   resets the net but keeps the replay: the feature names travel with it (`replay/meta.json`),
   columns are mapped by name, new ones are zero and calendar ones recomputed from each bar's
   timestamp (`OnlineLearner._copy_replay`).
 - `steel/sources/` — one module per venue (a `Source` subclass, base.py), the priority-ordered
-  `VENUES` list (registry.py) and `SourceManager` (manager.py: failover per symbol, the merged
+  `VENUES` list (registry.py) and `SourceManager` (manager.py: failover per pair, the merged
   startup backfill, toggles persisted to `state/sources.json`). Coinbase (websocket trades +
   ticker, candles by date range, the deep backfill), Kraken (websocket, 720 candles) and
   Hyperliquid (the one perp venue on by default) are on out of the box; every other venue is
@@ -102,6 +106,23 @@ and `steel check` names `flint-run.service` (and any `llama-server@*`) when a st
   the package and refuses any path the reader did not declare in `endpoints`. Spot and perp
   positions (`kind: "perp"`, signed size, entry, mark, leverage) from every venue that has a key
   or, for Hyperliquid and dYdX, just a wallet address. Balance reads only, never orders.
+- `steel/tape.py`, `steel/book.py` — the order-flow data layer. The tape keeps every real print
+  from every live venue (the manager's `on_trade` hook fires for active and standby venues,
+  never the simulator) in a ring per pair under `tape_mb`, and answers the last prints, volume
+  and delta by MMT's eleven size bands, and CVD per bar. The book store keeps each live venue's
+  resting bids and asks (`Source._depth` from the venues' depth channels, the manager's
+  `on_depth`), the seven depth bands in USD, the aggregate ladder with venue shares, a per-bar
+  imbalance history, and a decimated level history for the heatmap. Four book features ride in
+  every bar (`features.BOOK`); `/api/tape` and `/api/book` feed the pair detail's panels. Book
+  reads stay within one dollar class (`BookStore.live(quote=...)`, the pair's provider's by
+  default): a USDT book merged with a USD one puts the best bid and ask a basis apart.
+- `steel/derivs.py`, `steel/sources/derivs.py` — liquidations and perp statistics from the perp
+  venues' public streams (Binance USD-M, Bybit linear, OKX swaps; `derivs_venues`), run by
+  `DerivManager` beside the market-data sources and never a price provider. `LiqStore` keeps
+  every liquidation (a long liquidated is a forced sell, side -1) and `PerpStats` the latest OI,
+  funding, mark and index per venue with an OI-weighted aggregate; two flow features ride in
+  every bar (`features.FLOW`), the aggregate funding drives the policy's carry and the paper
+  book's accrual, and `/api/derivs` feeds the pair detail's Derivatives panel.
 - `steel/vault.py` — the key vault: a master key Steel generates on first start
   (`state/vault.key`, owner-only) seals every `<service>.json` and `<venue>-trade.json` at rest
   (Fernet); plaintext key files found at start are sealed in place; `config._json_file` reads
@@ -157,6 +178,9 @@ and `steel check` names `flint-run.service` (and any `llama-server@*`) when a st
   the checkpoint, vault key, token, sealed key files, the live book, the order and arbitrage
   ledgers, universe, source toggles, identity book and machine cache. `_backup_loop` writes one a
   day into `STEEL_BACKUP_DIR` when set, keeping `backup_keep`.
+- `steel/execution/algos.py` — TWAP, scale and chase as pure planners and a runner whose every
+  child order goes through `Executor.place` (the gate, the audit log, dry run); started from
+  the ticket's "Send via gate" (`/api/algo`), listed on Ops. Nothing here bypasses the gate.
 - `steel/live.py` — the live book and the promotion rule. `Promotion.check` reads the weekend
   backtest's totals and the paper book's record (trusted, scored days, net bps per day, hit
   rate, days running, per-bar Sharpe, drawdown, return) into a checklist; the operator promotes
@@ -186,19 +210,79 @@ and `steel check` names `flint-run.service` (and any `llama-server@*`) when a st
   maintenance margin) the policy and the paper book charge.
 - `steel/clock.py` — UTC-day arithmetic and the weekly backtest window. There is no session.
 - `steel/server.py` — FastAPI routes and the `/ws` websocket.
+- `docs/` — the public site, served by GitHub Pages from this folder (`docs/CNAME` is
+  steel.thingg.co, a sibling of flint.thingg.co; enable Pages on the repo) and by the running box
+  at `/docs/`: `index.html` (the live-tape hero replays `data/tape-sample.json`, 34 s of real
+  prints), `whitepaper.html` (v0.2, organised around measurement and cost honesty, a measured or
+  modeled tag per section), `design/redesign-proposal.html`, `api.md`, the screenshots under
+  `img/` (rendered headlessly from the dashboard) and the fonts under `fonts/` (the same files as
+  `web/fonts/`, paths relative). User-facing pages share the dashboard's tokens.
+- `steel/apiv1.py` — the data API for other programs, `/api/v1` (`docs/api.md`): every store as
+  REST with the dashboard's shapes frozen, the operator token on every request whenever auth is
+  on, a weight budget per token per minute (`api_weight_per_minute`; 429 past it), and the
+  `/api/v1/stream` websocket (trades, book tops, liquidations, bars, rule hits; `apiv1.push` is
+  what the engine's hooks call, one attribute read when nobody listens). Reads only.
+- `steel/indicators.py` — the operator's Python indicators: `state/indicators/*.py` declare them
+  with `@indicator` (pane own or price; line, hist or marker; params; color); the engine builds a
+  per-bar context (OHLCV, buy/sell, the tape's delta and CVD, OI, liquidations, funding, book)
+  and runs them on demand (`indicator_values`, cached 10 s); files reload on change and a
+  failing file keeps its error in the catalog. The chart's "yours" layer group and the Research
+  editor. The code runs with the engine's privileges, like any plugin; never a model feature.
+- `steel/docsgen.py` — `steel appendix [--check]`: the whitepaper's appendix (every setting with
+  its default and comment from config.py, the feature groups, the v1 routes) generated between
+  the `generated:appendix` markers in `docs/whitepaper.html`, so it cannot drift from the code.
+- `steel/mcp.py` — `steel mcp`: a Model Context Protocol server on stdin/stdout (JSON-RPC, no
+  SDK) whose tools read Steel's API with the operator token (state, markets, screener, candles,
+  tape, delta, book, footprint, derivs, positioning, liqmap, premium, levels, options, forecast,
+  ticket, calendar, predictions, alerts); the series-alert add/remove tools need `--rules`. No
+  tool can order, move funds, change a setting or arm a venue.
+- `steel/rules.py` — the operator's series alerts: a rule names a pair (or any), a screener
+  series, a comparison (including crosses) and a value; the engine evaluates them every ten
+  seconds over the screener's rows, with a cooldown per rule and pair; hits go to the alert
+  destinations, the console, the websocket and the stream. `state/rules.json`; the Ops panel.
 - `steel/config.py` — every knob, each reading a `STEEL_*` env var or a json file, with a default;
   `canonical()` turns `btc`, `ETH/USD`, `SOLUSDT` into `BASE-USD`.
-- `web/` — the dashboard: plain HTML/CSS/JS, no build step, served static. Six views, by what the
-  operator looks at (`VIEW_OF` in app.js maps each panel to its view; `vis(part)` gates a
-  renderer): Market (whole market, dislocations, watch list, radar, news, the brief), Names (the
-  cards, the detail, the universe), Book (paper equity, positions, trades, exchange balances),
-  Venues (sources, signals, keys), Research (backtest, sweep, the model's tiles and log), Ops
-  (controls, brief control, execution and its kill switch, the consoles, the terminal). Old
-  hashes and saved views (`#dashboard`, `#consoles`, ...) map through `LEGACY_VIEW`.
+- `web/chart.js` — the chart engine (`SteelChart`): one canvas, time on the x axis, panes for
+  price (candles, VWAP, liquidation triangles, the model's calls and forecast fan), volume by
+  side, and delta/CVD, over `/api/candles` (`Engine.candles`: the tape at any timeframe for its
+  reach, the 5-minute bars beyond, a venue set). Wheel zooms, drag pans, double-click resets.
+  The Chart view and the pair detail's Chart button use it; the card charts still use `drawChart`.
+  Its layers beyond candles: the footprint (`Tape.footprint`, `/api/footprint`: buckets, POC,
+  value area, stacked imbalances, bubbles, CVD by size band), the visible-range volume profile
+  and TPO (client-side), the day VWAP with σ bands and a shift-click anchored VWAP, period levels
+  (`Engine.levels` from the replay's closes), the order-book heatmap (`BookStore.heatmap` over the
+  level history, one dollar class), and the modeled liquidation map (`steel/liqmap.py`: OI rises
+  open notional at the bar's close, projected per leverage band, spent when traded through;
+  always labelled as modeled). Bar replay slices the loaded payload client-side.
+- `web/` — the dashboard: plain HTML/CSS/JS, no build step, served static. Seven views, by what the
+  operator does (`VIEW_OF` in app.js maps each panel to its view; `vis(part)` gates a renderer;
+  the keys `1`–`7` switch them): Desk (the status strip's routine, the screener as table or
+  heatmap, the model's calls and cards, the next events, dislocations, the watch list, the radar,
+  news, the brief), Chart (the chart engine with the pair rail beside it: the detail docked, with
+  tape, book, derivatives and options for the pair; the ticket's rays; replay), Flow (leverage
+  across the market, the options surface, the prediction markets, the crowd), Book (paper and
+  live positions, fills, transfers, balances, history), Model (the indicator editor, the
+  backtest and sweep, the scorecard, calibration, drift and net weight, the universe), Venues
+  (sources and the simulator switch, signals, keys, fee tiers), Ops (controls, the execution
+  gate and kill switch, algorithms, series alerts, the GPU handoff, consoles). Old hashes
+  (`#market`, `#names`, `#research`, `#dashboard`, ...) map through `LEGACY_VIEW`. The identity
+  (docs/design/redesign-proposal.html): a cold blue-black canvas, one tempered-blue accent, the
+  tempering scale (straw to blue) as the heat scale, Archivo for text and JetBrains Mono for
+  numbers (vendored in `web/fonts/`), the wordmark's temper line pulsing while feeds tick. The
+  global status strip under the header is the trader's routine (regime, breadth, Fear & Greed,
+  the funding median, open interest and liquidations on the perp venues, dislocations open, the
+  next scheduled event, trust), from `/api/screener` and `/api/calendar` every 15 s.
+  `window.steel` exposes `openChart`, `openDetail`, `closeDetail`, `showTab`, `chart()` and
+  `state()` for widgets.js and the console.
+  `web/widgets.js` makes every panel a widget (drag to reorder, collapse; saved per view in
+  the browser, exported and imported as JSON from the header's Layout menu) and links the chart
+  to the pair opened elsewhere. `web/chart.js` is the chart engine, `web/indicators.js` the
+  built-in indicator math; the palette (`/`, ctrl+K) and the keys `1`–`7`, `?` are in app.js.
 
 ## Invariants worth keeping
 
-- Symbols are canonical `BASE-USD` everywhere inside the app (`config.canonical`); each source maps
+- Pairs are canonical `BASE-USD` everywhere inside the app (`config.canonical`; the code's
+  identifiers say `symbols`, user-facing text says pairs); each source maps
   to its venue's spelling (`BTC/USD` on Kraken's websocket, `XBTUSD` on its REST, `BTCUSDT` on
   Binance, Bybit, Bitget and MEXC, `BTC-USDT` on OKX and KuCoin, `BTC_USDT` on Gate.io, `tBTCUSD`
   on Bitfinex, `PF_XBTUSD` on Kraken Futures, `XBTUSDT` on BitMEX, the bare `BTC` on Hyperliquid;
@@ -356,7 +440,7 @@ and `steel check` names `flint-run.service` (and any `llama-server@*`) when a st
 - Everything about the model, the checkpoint migration, the memory guard, the backtest owning
   the GPU, the CUDA cache discipline and the autotune cache key is inherited from Flint and
   documented in `../flint/CLAUDE.md`; it applies here unchanged. A change of window or feature
-  set resets the model once (backed up to `model.pt.bak`); a symbol-list change migrates it.
+  set resets the model once (backed up to `model.pt.bak`); a pair-list change migrates it.
   The replay differs from Flint's: it is a bar store (above). A window's first `add` stores its
   lead-in bars unlabeled; a restart's re-walk of the same days adds nothing (dedupe on the
   labeled end bar); a universe change leaves a new name's columns empty (`has` False) until the

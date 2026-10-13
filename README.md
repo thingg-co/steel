@@ -16,6 +16,40 @@ It is a research toy. The forecasts are in basis points, the paper book pays eve
 real fill would (venue fees, the spread, funding, and the fee and wait of moving money
 between venues), and none of it is advice. Do not trade on it.
 
+The public page is [steel.thingg.co](https://steel.thingg.co) (served from `docs/`; the running box also serves it at `/docs/`), with the [whitepaper](docs/whitepaper.html) and the [redesign proposal](docs/design/redesign-proposal.html) beside it.
+
+## Screenshots
+
+The Market view: the whole market by category, the cross-venue dislocation monitor and the
+news skim, with the status strip saying which venues are feeding.
+
+![Market view](docs/img/market.png)
+
+A pair's detail from the Names view: the chart with the forecast fan, the 1-hour, 4-hour and
+1-day medians, why the policy is holding, and the Ticket button.
+
+![Pair detail](docs/img/detail.png)
+
+| Names | Book |
+|---|---|
+| ![Names](docs/img/names.png) | ![Book](docs/img/book.png) |
+
+| Venues | Research | Ops |
+|---|---|---|
+| ![Venues](docs/img/venues.png) | ![Research](docs/img/research.png) | ![Ops](docs/img/ops.png) |
+
+The Chart view: candles from every venue's prints, the forecast fan with the longer horizons'
+medians, and the operator's own Python indicators in their panes (here the VWAP deviation).
+
+![Chart](docs/img/chart.png)
+
+The screener as a heatmap (tiles colored by any stored series, the biggest names wider), the
+calendar and the prediction markets, and the series alerts on Ops.
+
+| Screener | Events and prediction markets | Series alerts |
+|---|---|---|
+| ![Screener](docs/img/screener.png) | ![Events](docs/img/events.png) | ![Alerts](docs/img/alerts.png) |
+
 ## Setup
 
 Steel needs Python 3.11 or newer and [uv](https://docs.astral.sh/uv/). Everything else is
@@ -87,6 +121,8 @@ All of them run as `uv run steel <command>`; none needs the server running excep
 | `steel` | start the server (`--symbols`, `--feed`, `--host`, `--port`, `--no-news`, `--log-level`) |
 | `steel check` | what a start would do here: device, free memory, the cached model size; exits non-zero when the model would not fit |
 | `steel venues` | every market-data source, balance reader and order client with its id and default state |
+| `steel appendix [--check]` | regenerate the whitepaper's appendix (settings, features, routes) from the code; `--check` exits 1 when it is stale |
+| `steel mcp [--rules]` | an MCP server on stdin/stdout over Steel's API for an agent (Claude Code, Claude Desktop): every store as a tool, reads only; `--rules` adds the series-alert tools. Never orders |
 | `steel token [rotate]` | print (or replace) the operator token the dashboard needs for any change |
 | `steel vault status\|rotate\|restore <key>` | the key vault: what is sealed, a new master key, a restore on a new box |
 | `steel backup [dir] [--replay]` | one archive of the checkpoint, vault key, token, sealed keys, ledgers and universe (`--replay` adds the replay buffer); `STEEL_BACKUP_DIR` makes the server write one a day |
@@ -245,11 +281,18 @@ replay instead of resetting them.
 
 ## The interface
 
-Six views, by what the operator is looking at:
+Seven views, by what the operator is looking at (every panel is a widget: drag its grip to
+reorder, collapse it, export the layout from the header's Layout menu; `/` or ctrl+K opens the
+command palette, `1`–`7` switch views):
 
-- **Market** — the whole market: regime, breadth / Fear & Greed / DVOL, category rotation,
-  dominance and stablecoin flow, the cross-venue dislocations, the watch list, the 250-name
-  radar, the news and the brief.
+- **Market** — the whole market: the screener (every pair by every stored series, as a table or
+  a heatmap), the next scheduled events, Polymarket's crypto markets, Deribit's options surface,
+  regime, breadth / Fear & Greed / DVOL, category rotation, dominance and stablecoin flow, the
+  cross-venue dislocations, the watch list, the 250-name radar, the news and the brief.
+- **Chart** — candles from every venue's prints at any timeframe, the footprint, volume
+  profile and TPO, the book and liquidation heatmaps, net positioning, GEX, the indicator
+  catalog and your own Python indicators, the model's calls and forecast fan, paper fills and
+  transfer waits, the order ticket's draggable rays, and bar replay.
 - **Names** — a forecast card per name (the chart plus the forecast fan), ranked by urgency;
   a detail view with the longer horizons, the crowd, the identity of the coin, and a copyable
   order ticket for placing the call by hand; the universe editor.
@@ -258,10 +301,12 @@ Six views, by what the operator is looking at:
   with their equity over time.
 - **Venues** — the data sources and their toggles, the signal providers, every key and the
   vault.
-- **Research** — the weekly walk-forward backtest and the policy sweep, the model's live
-  scorecard, calibration by name, feature drift, and the arbitrage replay.
+- **Research** — the indicator editor, the weekly walk-forward backtest and the policy sweep,
+  the model's live scorecard, calibration by name, feature drift with the net's weight per
+  feature, and the arbitrage replay.
 - **Ops** — the live controls, execution (arming, caps, the clock, the GPU mode, the kill
-  switch), the live book and its promotion checklist, the arbitrage switch, the consoles.
+  switch), the algorithm runs, the series alerts, the live book and its promotion checklist,
+  the arbitrage switch, the consoles.
 
 Everything is on the websocket, also reachable over HTTP: `GET /api/state`, `/api/news`,
 `/api/sources`, `/api/signals`, `/api/keys`, `/api/backtest`, `/api/monitor`,
@@ -269,10 +314,36 @@ Everything is on the websocket, also reachable over HTTP: `GET /api/state`, `/ap
 `POST /api/control`, `/api/keys`, `/api/execution`, `/api/live`, `/api/arb`, `/api/handoff`
 (the POSTs need `Authorization: Bearer <token>`).
 
+## Your own indicators
+
+Drop a Python file in `state/indicators/` (or write it in the Research tab's editor):
+
+```python
+@indicator("oi_rsi", pane="own", kind="line", params={"n": 14}, color="#bb9af7")
+def oi_rsi(ctx):
+    "RSI of open interest: crowding into one side of the perp book."
+    return ctx.rsi(ctx.oi, ctx.params["n"])
+```
+
+`ctx` carries numpy arrays over the pair's bars (OHLCV, buy and sell volume, the tape's delta and
+CVD, open interest, liquidations by side), the latest funding, the book bands and a few helpers
+(`ema`, `sma`, `std`, `rsi`, `zscore`, `diff`, `cross`). Files reload on save; each indicator shows
+up in the chart's Layers menu under "yours" as its own pane, a price overlay or markers. Steel
+writes `examples.py` on first start.
+
+## The data API
+
+Everything Steel stores is readable by other programs under `/api/v1`: markets, the screener,
+candles at any timeframe, the tape and delta by size band, footprints, books and heatmaps, the
+liquidation map, derivatives, positioning, premiums, levels, options, the model's forecast, the
+calendar and the prediction markets, plus one websocket stream of trades, book tops,
+liquidations, bars and rule hits. Reads only, behind the operator token, under a weight budget
+per minute. `docs/api.md` documents every route and shape; `GET /api/v1` returns the index.
+
 ## Layout
 
 ```
-steel/config.py    settings and STEEL_* overrides; canonical symbol names
+steel/config.py    settings and STEEL_* overrides; canonical pair names
 steel/clock.py     UTC days and the weekly backtest window (there is no session)
 steel/autotune.py  device detection + first-run model auto-sizing + the memory guard
 steel/feed.py      shared Tick type and the offline simulator

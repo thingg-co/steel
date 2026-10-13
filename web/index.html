@@ -4,32 +4,56 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Steel</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='88'%3E%E2%9A%99%EF%B8%8F%3C/text%3E%3C/svg%3E">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png">
+<meta name="theme-color" content="#0a0d12">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Steel">
+<link rel="manifest" href="/static/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/static/icons/icon-180.png">
+<link rel="stylesheet" href="/static/fonts/fonts.css">
 <link rel="stylesheet" href="/static/style.css">
 <script>(function(){try{var t=localStorage.getItem("steel.theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t;}catch(e){}})();</script>
 </head>
-<body data-view="market">
+<body data-view="desk">
 <header class="top">
-  <div class="brand"><span class="fire">⚙️</span> Steel <span class="sub">continuously learning crypto market model</span></div>
+  <a class="brand" href="#desk" title="Steel"><span class="wordmark">STEEL</span><span class="temperline" id="pulse"></span></a>
+  <nav class="tabs" aria-label="views">
+    <button data-tab="desk" class="active"><kbd>1</kbd>Desk</button>
+    <button data-tab="chart"><kbd>2</kbd>Chart</button>
+    <button data-tab="flow"><kbd>3</kbd>Flow</button>
+    <button data-tab="book"><kbd>4</kbd>Book</button>
+    <button data-tab="model"><kbd>5</kbd>Model</button>
+    <button data-tab="venues"><kbd>6</kbd>Venues</button>
+    <button data-tab="ops"><kbd>7</kbd>Ops</button>
+  </nav>
   <div class="status">
     <span class="pill" id="feed">feed: ?</span>
     <span class="pill" id="learning">learning</span>
     <span class="kv"><label>bars</label><b id="bars">0</b></span>
     <span class="kv"><label>pending</label><b id="pending">0</b></span>
-    <span class="pill market-nav" id="market" title="trades around the clock; the border pulses with live data"><span id="market-label">24/7</span><label class="alert-dot" title="sound alerts on major events"><input type="checkbox" id="sound-toggle"><i></i></label></span>
+    <span class="pill market-nav" id="market" title="trades around the clock; the border pulses with live data"><span id="market-label">24/7</span><label class="alert-dot" title="sound alerts on major events"><input type="checkbox" id="sound-toggle"><i></i></label><label class="alert-dot bell" title="browser notifications for fills, rule hits, stalls and errors (a phone needs the page installed from its share menu)"><input type="checkbox" id="notify-toggle"><i></i></label></span>
   </div>
-  <nav class="tabs">
-    <button data-tab="market" class="active">Market</button>
-    <button data-tab="names">Names</button>
-    <button data-tab="book">Book</button>
-    <button data-tab="venues">Venues</button>
-    <button data-tab="research">Research</button>
-    <button data-tab="ops">Ops</button>
-  </nav>
-  <button id="theme-toggle" class="tgl" type="button" aria-label="Switch theme" title="Switch theme">☀</button>
+  <div class="tools">
+    <button id="palette-btn" class="tgl" type="button" title="command palette: / or ctrl+K">/</button>
+    <button id="theme-toggle" class="tgl" type="button" aria-label="Switch theme" title="Switch theme">☀</button>
+  </div>
+  <div class="strip" id="strip" title="the routine: the regime, breadth, the crowd, funding across pairs, open interest and liquidations on the perp venues, dislocations open, the next scheduled event, and whether the model is trusted"></div>
 </header>
 
-<main id="market" class="view">
+<main id="desk" class="view">
+  <section class="panel screener" id="screener-panel">
+    <div class="sources-head"><h3>Screener <small id="scr-meta">every pair by the live series</small></h3>
+      <span class="scr-ctl"><label>color by <select id="scr-col"><option value="delta_1h">tape delta 1h</option><option value="chg_1h_bps">change 1h</option><option value="oi_chg_1h">OI change 1h</option><option value="funding">funding</option><option value="liq_1h">liquidations 1h</option><option value="book_imb_05">book imbalance</option><option value="q50">the model's call</option></select></label>
+      <button type="button" class="mini" id="scr-mode" data-mode="table">heatmap</button></span></div>
+    <div class="radar-table" id="scr-table"></div><div class="scr-grid" id="scr-grid" hidden></div>
+  </section>
+  <section class="cards" id="cards"></section>
+  <div class="more-wrap" id="more-wrap" hidden><button id="more-cards">Show 50 more</button><small id="more-meta"></small></div>
+  <div class="row pcards">
+    <section class="panel" id="events-panel"><h3>Next events <small id="ev-meta">FOMC, CPI, jobs, expiries</small></h3><div class="radar-table" id="ev-table"></div></section>
+    <section class="panel" id="calls-panel"><h3>The model's calls <small id="calls-meta">the live 1-hour view, by urgency</small></h3><div class="radar-table" id="calls-table"></div></section>
+  </div>
   <section class="panel market" id="market-panel">
     <div class="market-head">
       <h3>Whole market <small id="market-meta">scanning…</small></h3>
@@ -58,7 +82,7 @@
   <section class="panel radar">
     <div class="radar-head">
       <h3>Movers radar <small id="radar-meta">the top names by market cap</small></h3>
-      <input type="text" id="radar-filter" placeholder="filter symbol…" autocomplete="off">
+      <input type="text" id="radar-filter" placeholder="filter pair…" autocomplete="off">
     </div>
     <div class="radar-table" id="radar-table"></div>
   </section>
@@ -73,22 +97,50 @@
   </section>
 </main>
 
-<main id="names" class="view">
-  <section class="cards" id="cards"></section>
-  <div class="more-wrap" id="more-wrap" hidden><button id="more-cards">Show 50 more</button><small id="more-meta"></small></div>
-  <section class="panel universe">
-    <div class="sources-head"><h3>Universe <small id="uni-meta">names the model trades — mute to pause, remove to drop (frees compute)</small></h3>
-      <div class="class-toggles" id="class-toggles"></div></div>
-    <div class="uni-add">
-      <input type="text" id="uni-add-input" placeholder="add a name, e.g. ARB or ARB-USD" autocomplete="off" autocapitalize="characters">
-      <button type="button" data-action="add_symbol">Add</button>
-      <button type="button" data-action="add_movers">+ Top 20 movers</button>
-      <button type="button" data-action="refresh_universe">Refresh universe now</button>
+<main id="chart" class="view">
+<div class="chart-layout">
+  <section class="panel chart-panel">
+    <div class="chart-bar">
+      <select id="ch-pair" title="pair"></select>
+      <div class="ch-tf" id="ch-tf"><button data-tf="60">1m</button><button data-tf="300" class="active">5m</button><button data-tf="900">15m</button><button data-tf="3600">1h</button><button data-tf="14400">4h</button><button data-tf="86400">1d</button></div>
+      <div class="ch-venues" id="ch-venues" title="which venues' prints build the candles; none = all"></div>
+      <span class="ch-kind"><button type="button" class="mini" data-kind="spot" title="only the spot venues' prints">spot</button><button type="button" class="mini" data-kind="perp" title="only the perp venues' prints">perps</button></span>
+      <details class="ch-menu" id="ch-layers"><summary>Layers</summary><div class="ch-menu-body">
+        <div class="ch-group"><b>price</b><label><input type="checkbox" data-layer="pvsra"> PVSRA candles</label><label><input type="checkbox" data-layer="footprint" checked> footprint</label><label><input type="checkbox" data-layer="bubbles" checked> bubbles</label><label><input type="checkbox" data-layer="liq" checked> liquidations</label><label><input type="checkbox" data-layer="calls" checked> model calls</label><label><input type="checkbox" data-layer="fills" checked> paper fills</label><label><input type="checkbox" data-layer="transfers" checked> transfer waits</label><label><input type="checkbox" data-layer="forecast" checked> forecast fan</label></div>
+        <div class="ch-group"><b>overlays</b><label><input type="checkbox" data-layer="vwap" checked> day VWAP</label><label><input type="checkbox" data-layer="vwapBands" checked> VWAP σ bands</label><label><input type="checkbox" data-layer="levels" checked> period levels</label><label><input type="checkbox" data-layer="sessions"> sessions</label><label><input type="checkbox" data-layer="ema"> EMA 12 26 50 200</label><label><input type="checkbox" data-layer="bollinger"> Bollinger 20 2</label><label><input type="checkbox" data-layer="supertrend"> supertrend 10 3</label><label><input type="checkbox" data-layer="ichimoku"> Ichimoku</label><label><input type="checkbox" data-layer="structure"> structure (BOS, OB, FVG)</label></div>
+        <div class="ch-group"><b>maps</b><label><input type="checkbox" data-layer="profile" checked> volume profile</label><label><input type="checkbox" data-layer="tpo"> TPO</label><label><input type="checkbox" data-layer="heatmap"> book heatmap</label><label><input type="checkbox" data-layer="liqmap"> liquidation map</label><label>at <select id="ch-liqband"><option value="0">all</option><option value="5">5x</option><option value="10">10x</option><option value="25">25x</option><option value="50">50x</option><option value="75">75x</option><option value="100">100x</option></select></label><label><input type="checkbox" data-layer="gex"> GEX (BTC, ETH)</label></div>
+        <div class="ch-group"><b>panes</b><label><input type="checkbox" data-layer="volume" checked> volume</label><label><input type="checkbox" data-layer="delta" checked> delta</label><label><input type="checkbox" data-layer="cvd" checked> CVD</label><label>CVD from <select id="ch-band"><option value="0">all</option><option value="1">$1k</option><option value="2">$5k</option><option value="3">$10k</option><option value="4">$25k</option><option value="5">$50k</option><option value="6">$100k</option><option value="7">$250k</option><option value="8">$500k</option><option value="9">$1M</option><option value="10">$5M</option></select></label><label><input type="checkbox" data-layer="positioning"> net positioning</label><label><input type="checkbox" data-layer="oi"> open interest</label><label><input type="checkbox" data-layer="oiZ"> as z-score</label><label><input type="checkbox" data-layer="rsi"> RSI</label><label><input type="checkbox" data-layer="macd"> MACD</label><label><input type="checkbox" data-layer="premium"> premiums (basis, Coinbase)</label></div>
+        <div class="ch-group" id="ch-custom-group"><b>yours</b><span class="muted" id="ch-custom-empty">none yet · Research › Indicators</span></div>
+      </div></details>
+      <button type="button" class="mini" id="ch-latest" title="jump to the latest candle">latest</button>
+      <button type="button" class="mini" id="ch-ticket" title="the order ticket for this pair, with its rays on the chart (drag them)">ticket</button>
+      <span class="ch-replay" id="ch-replay"><button type="button" class="mini" id="ch-replay-toggle" title="step through the loaded candles as they happened">replay</button><input type="range" id="ch-replay-pos" min="0" max="100" value="100" hidden><button type="button" class="mini" id="ch-replay-play" hidden>play</button><span id="ch-replay-at" class="mono"></span></span>
     </div>
-    <div class="uni-list" id="uni-list"></div>
+    <canvas id="ch-canvas" class="bigchart" tabindex="0"></canvas>
+    <div class="ch-readout mono" id="ch-readout"></div>
+    <div class="why">Candles are built from every live venue's prints (the tape) at any timeframe for the last day, and from the 5-minute bars beyond it. Wheel zooms, drag pans, double-click resets, ← → step. Zoom in to read the footprint: sells at the bid on the left of each candle, buys at the ask on the right, the point of control shaded, the 70% value area boxed, stacked imbalances in full color. Circles are large prints. The profile at the right edge is the visible range's volume at price (POC in yellow, the 70% value area brighter); TPO is the count of candles that touched each price; level lines are the day's open, high and low, yesterday's, the week's and the month's, from 5-minute closes; shift-click a candle to anchor a VWAP there. The book heatmap paints resting bids (blue) and asks (orange) over time; the liquidation map is modeled from open-interest changes and leverage bands, never real positions, with each cluster spent once price trades through it. Positioning counts only the flow open interest confirms (new longs, new shorts, closes); a yellow circle marks absorption, heavy new positioning that failed to move price. Triangles are liquidations (red below: longs, green above: shorts); arrows are the model's resolved calls, filled when they hit; the fan is its live forecast.</div>
   </section>
+<aside id="chart-rail" class="chart-rail"></aside>
+</div>
 </main>
 
+<main id="flow" class="view">
+  <section class="panel" id="leverage-panel">
+    <div class="sources-head"><h3>Leverage across the market <small id="lev-meta">open interest, funding and liquidations per pair, from four perp venues</small></h3>
+      <span class="scr-ctl"><label>sort by <select id="lev-sort"><option value="oi_usd">open interest</option><option value="oi_chg_1h">OI change 1h</option><option value="funding">funding</option><option value="liq_1h">liquidations 1h</option><option value="book_imb_05">book imbalance</option></select></label></span></div>
+    <div class="radar-table" id="lev-table"></div>
+  </section>
+  <section class="panel options-panel" id="options-panel">
+    <div class="sources-head"><h3>Options <small id="opt-meta">Deribit's chain: dealer gamma by strike, the smile, the term structure</small></h3>
+      <span class="scr-ctl"><button type="button" class="mini on" data-opt="BTC">BTC</button><button type="button" class="mini" data-opt="ETH">ETH</button></span></div>
+    <div class="opt-body"><div><div class="pstats" id="opt-stats"></div><canvas id="opt-smile" class="pcurve" height="160"></canvas></div>
+      <div><div class="radar-table" id="opt-term"></div><div class="radar-table" id="opt-walls"></div></div></div>
+  </section>
+  <div class="row pcards">
+    <section class="panel" id="pred-panel"><h3>Prediction markets <small id="pred-meta">Polymarket's open crypto markets, read-only</small></h3><div class="radar-table" id="pred-table"></div></section>
+    <section class="panel" id="crowd-panel"><h3>The crowd <small id="crowd-meta">Fear &amp; Greed, Reddit, funding, the long/short ratio, open interest, the basis</small></h3><div class="pstats" id="crowd-stats"></div><div class="why">The crowd overlay fades a thin edge into extreme crowding; the numbers here are the inputs it reads. Positioning and the liquidation map per pair are on the Chart's layers.</div></section>
+  </div>
+</main>
 <main id="book" class="view">
   <div class="row pcards">
     <section class="panel"><div class="peq"><span class="peq-label">paper equity</span><span class="peq-val" id="p-equity">$100,000</span><span class="peq-ret" id="p-return">+0.00%</span></div></section>
@@ -115,7 +167,7 @@
 <main id="venues" class="view">
   <section class="panel sources">
     <div class="sources-head">
-      <h3>Data sources <small id="sources-meta">toggle any venue; the highest-priority live one serves each symbol</small></h3>
+      <h3>Data sources <small id="sources-meta">toggle any venue; the highest-priority live one serves each pair</small></h3>
     </div>
     <div class="source-list" id="source-list"></div>
     <div class="news-sources">
@@ -139,7 +191,16 @@
   </section>
 </main>
 
-<main id="research" class="view">
+<main id="model" class="view">
+  <section class="panel ind-panel" id="ind-panel">
+    <div class="sources-head"><h3>Indicators <small id="ind-meta">your own, in Python, over the bars, the tape, open interest and liquidations; drawn on the chart</small></h3>
+      <span class="scr-ctl"><select id="ind-file"></select><button type="button" class="mini" id="ind-new">new file</button><button type="button" class="mini" id="ind-save">Save</button><button type="button" class="mini" id="ind-reload">Reload</button><button type="button" class="mini danger" id="ind-delete">Delete</button></span></div>
+    <div class="ind-body">
+      <textarea id="ind-source" spellcheck="false" placeholder="@indicator('name', pane='own', kind='line', params={'n': 14}, color='#bb9af7')&#10;def name(ctx):&#10;    'one line of help'&#10;    return ctx.rsi(ctx.oi, ctx.params['n'])"></textarea>
+      <div class="ind-side"><div class="ind-errors" id="ind-errors"></div><div class="radar-table" id="ind-catalog"></div>
+        <div class="why">A function gets <code>ctx</code> with numpy arrays over the pair's 5-minute bars, oldest first: <code>t open high low close volume buy sell delta cvd oi liq_long liq_short</code>, the latest <code>funding</code>, the current <code>book</code> bands, and <code>params</code>; helpers <code>ema sma std rsi zscore diff roll_max roll_min cross</code>. Return one array (nan where undefined), a dict of arrays (several lines), or for <code>kind='marker'</code> a list of <code>(t, price, text)</code>. Files reload on save; a file that fails keeps its error here and its indicators off the chart. The code runs with the engine's privileges.</div></div>
+    </div>
+  </section>
   <section class="panel"><h3>Walk-forward backtest <small id="bt-meta"></small> <button class="mini" id="bt-run">Run now</button></h3><div class="bt-progress" id="bt-progress" hidden><i></i></div><div class="pstats" id="bt-stats"></div></section>
   <section class="panel"><h3>Equity curve <small>cumulative net bps per day; the thin grey line is an always-long 1/N book</small></h3><canvas id="bt-curve" class="pcurve"></canvas></section>
   <div class="row pcards">
@@ -190,6 +251,17 @@
       </div>
     </div>
   </section>
+  <section class="panel universe">
+    <div class="sources-head"><h3>Universe <small id="uni-meta">names the model trades — mute to pause, remove to drop (frees compute)</small></h3>
+      <div class="class-toggles" id="class-toggles"></div></div>
+    <div class="uni-add">
+      <input type="text" id="uni-add-input" placeholder="add a name, e.g. ARB or ARB-USD" autocomplete="off" autocapitalize="characters">
+      <button type="button" data-action="add_symbol">Add</button>
+      <button type="button" data-action="add_movers">+ Top 20 movers</button>
+      <button type="button" data-action="refresh_universe">Refresh universe now</button>
+    </div>
+    <div class="uni-list" id="uni-list"></div>
+  </section>
 </main>
 
 <main id="ops" class="view">
@@ -211,6 +283,20 @@
     <div class="brief-status" id="brief-status"></div>
   </section>
   <section class="panel exec-panel" id="exec-panel"><div class="sources-head"><h3>Execution <small id="exec-meta">off</small></h3></div><div class="pstats" id="exec-stats"></div></section>
+  <section class="panel algo-panel" id="algo-panel"><div class="sources-head"><h3>Algorithms <small id="algo-meta">TWAP, scale and chase runs through the gate; started from a ticket</small></h3></div><div class="radar-table" id="algo-runs"></div></section>
+  <section class="panel rules-panel" id="rules-panel"><div class="sources-head"><h3>Series alerts <small id="rules-meta">your own lines on any series Steel stores; sent where the Alerts key on Venues points</small></h3></div>
+    <form class="rules-form" id="rules-form">
+      <select id="rule-pair"><option value="*">any pair</option></select>
+      <select id="rule-series"></select>
+      <select id="rule-op"></select>
+      <input id="rule-value" type="number" step="any" placeholder="value" required>
+      <input id="rule-cooldown" type="number" min="60" step="60" value="900" title="seconds between two alerts of this rule for one pair">
+      <input id="rule-note" type="text" placeholder="note (optional)" maxlength="120">
+      <button type="submit" class="mini">Add</button>
+    </form>
+    <div class="radar-table" id="rules-table"></div>
+    <div class="rules-fired" id="rules-fired"></div>
+  </section>
   <section class="panel arb-panel" id="arb-panel"><div class="sources-head"><h3>Arbitrage executor <small id="arb-meta">off</small></h3></div><div class="pstats" id="arb-stats"></div><div class="radar-table" id="arb-recent"></div></section>
   <section class="panel live-panel" id="live-panel"><div class="sources-head"><h3>Live book <small id="live-meta">paper</small></h3></div><div class="pstats" id="live-stats"></div><div class="live-check" id="live-check"></div><div class="radar-table" id="live-orders"></div></section>
   <section class="console-grid" id="console-grid"></section>
@@ -242,7 +328,7 @@
 </div>
 <div class="tooltip" id="tooltip"></div>
 <button id="inject-fab" title="Inject a note to Steel  (⌘/Ctrl+I)">✎ Tell Steel</button>
-<button id="skip-fab" title="Jump past the symbol cards" hidden>↓ Past the cards</button>
+<button id="skip-fab" title="Jump past the pair cards" hidden>↓ Past the cards</button>
 <div id="detail" class="detail" hidden><div class="detail-card">
   <header><div class="dtitle"><span class="dsym"></span><span class="dmeta"></span></div><div class="dpx"><span class="dprice num"></span><span class="dchg num"></span></div><span class="dbadge"></span><button class="dclose" title="close (Esc)">×</button></header>
   <div class="dchart"><canvas id="dcanvas"></canvas></div>
@@ -256,6 +342,9 @@
   <div class="inject-row"><span class="inject-ack" id="inject-ack"></span><button id="inject-send">Send &crarr;</button></div>
 </div>
 
+<script src="/static/indicators.js"></script>
+<script src="/static/chart.js"></script>
+<script src="/static/widgets.js"></script>
 <script src="/static/app.js"></script>
 <footer class="foot">Steel · uptime <b id="uptime">0s</b> · © 2026 <a href="https://thingg.co" target="_blank" rel="noopener">thingg.co</a> · PolyForm Noncommercial</footer>
 </body>

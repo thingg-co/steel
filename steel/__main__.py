@@ -106,9 +106,9 @@ def _replay() -> None:
     except Exception:
         print("checkpoint age: unknown")
 
-    print(f"saved symbols: {len(saved_symbols)}")
+    print(f"saved pairs: {len(saved_symbols)}")
     print(f"saved shape: {saved_shape}")
-    print(f"current symbols: {len(current_symbols)}")
+    print(f"current pairs: {len(current_symbols)}")
     print(f"current shape: {current_shape}")
 
     if would_load:
@@ -216,8 +216,10 @@ def _sweep() -> None:
 def _backtest() -> None:
     """Walk-forward backtest over the saved replay without starting the server, on the cached
     preset: `steel backtest [--days N] [--hours H] [--cost BPS] [--warm N] [--night EPOCHS]
-    [--target absolute|relative|both]`. The live server runs its own once a week; do not run this
-    next to one, it loads the replay and a second model."""
+    [--target absolute|relative|both] [--preset S|M|L|XL|XXL|XXXL|4XL|5XL]`. The cached preset
+    (state/machine.json) is the default; `--preset` overrides it for an offline run on a box that
+    cannot hold the live size (a CPU box with the Spark's 5XL cache). The live server runs its
+    own once a week; do not run this next to one, it loads the replay and a second model."""
     import json
     import sys
     import time
@@ -240,6 +242,15 @@ def _backtest() -> None:
         preset = str(choice.get("preset", ""))
     except (OSError, ValueError, KeyError):
         print("no cached tuning in state/machine.json; using the config's model size")
+    if "--preset" in sys.argv:
+        from .autotune import PRESETS
+        want = sys.argv[sys.argv.index("--preset") + 1].upper() if sys.argv.index("--preset") + 1 < len(sys.argv) else ""
+        row = next((r for r in PRESETS if r[0] == want), None)
+        if row is None:
+            print(f"unknown preset {want!r}; one of {', '.join(r[0] for r in PRESETS)}")
+            raise SystemExit(2)
+        preset, cfg.d_model, cfg.dilations, cfg.n_heads, cfg.n_experts, cfg.window = row[0], row[1], tuple(row[2]), row[3], row[4], row[5]
+        print(f"preset {preset} by request: d_model {cfg.d_model}, window {cfg.window}")
     from .learner import BarStore, as_bars, read_replay
     z = read_replay(state)
     if z is None:
@@ -556,6 +567,13 @@ def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "token":
         _token()
         return
+    if len(sys.argv) > 1 and sys.argv[1] == "appendix":
+        from . import docsgen
+        raise SystemExit(docsgen.main(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "mcp":
+        from . import mcp
+        mcp.main(sys.argv[2:])
+        return
     if len(sys.argv) > 1 and sys.argv[1] == "vault":
         _vault()
         return
@@ -579,7 +597,7 @@ def main() -> None:
         return
     ap = argparse.ArgumentParser(prog="steel", description="continuously learning crypto market model with a live dashboard")
     ap.add_argument("--feed", metavar="VENUE", help="force one market-data source: auto (default), sim, or a venue id from `steel venues`")
-    ap.add_argument("--symbols", help="comma separated products, e.g. BTC-USD,ETH-USD (a bare BTC works too)")
+    ap.add_argument("--symbols", help="comma separated pairs, e.g. BTC-USD,ETH-USD (a bare BTC works too)")
     ap.add_argument("--host")
     ap.add_argument("--port", type=int)
     ap.add_argument("--no-news", action="store_true", help="disable the news skimmer")
@@ -621,7 +639,7 @@ def main() -> None:
         print(f"\n{e}")
         raise SystemExit(2)
     app = create_app(engine)
-    print(f"Steel listening on http://{cfg.host}:{cfg.port}  (feed={cfg.feed}, {len(cfg.symbols)} symbols: {', '.join(s.split('-')[0] for s in cfg.symbols[:12])}{'…' if len(cfg.symbols) > 12 else ''})")
+    print(f"Steel listening on http://{cfg.host}:{cfg.port}  (feed={cfg.feed}, {len(cfg.symbols)} pairs: {', '.join(s.split('-')[0] for s in cfg.symbols[:12])}{'…' if len(cfg.symbols) > 12 else ''})")
     # Graceful shutdown waits for in-flight requests and websocket handlers to return; cap it
     # so a stuck handler can never hold SIGTERM past systemd's stop timeout (the save in
     # the lifespan shutdown still runs after the cap).

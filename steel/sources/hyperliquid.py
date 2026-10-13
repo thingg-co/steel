@@ -148,7 +148,7 @@ class HyperliquidSource(Source):
 
         async def subscribe(ws):
             for coin in self._rev:
-                for kind in ("trades", "bbo"):
+                for kind in ("trades", "bbo") + (("l2Book",) if self.books else ()):
                     await ws.send(json.dumps({"method": "subscribe", "subscription": {"type": kind, "coin": coin}}))
             self.note = f"streaming trades for {len(self._rev)} perps"
 
@@ -180,5 +180,15 @@ class HyperliquidSource(Source):
                            int(d.get("time") or 0) / 1000.0 or None)
             if t:
                 self._emit(emit, t)
+        elif ch == "l2Book":
+            d = m.get("data") or {}
+            sym = self._rev.get(d.get("coin"))
+            if not sym:
+                return
+            factor = unscale(d["coin"])[1]
+            lv = d.get("levels") or [[], []]
+            bids = [(float(x["px"]) / factor, float(x["sz"]) * factor) for x in lv[0]]
+            asks = [(float(x["px"]) / factor, float(x["sz"]) * factor) for x in lv[1]]
+            self._depth(sym, bids, asks, True, int(d.get("time") or 0) / 1000.0 or None)     # every push is the whole top of the book
         elif ch == "error":
             self.note = f"ws: {str(m.get('data'))[:80]}"

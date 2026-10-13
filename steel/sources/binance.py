@@ -83,7 +83,7 @@ class BinanceSource(Source):
         if not self.symbols:
             return
         self._pairs = {self.pair(s): s for s in self.symbols}
-        streams = "/".join(f"{p.lower()}@trade/{p.lower()}@bookTicker" for p in self._pairs)
+        streams = "/".join(f"{p.lower()}@trade/{p.lower()}@bookTicker" + ("/" + f"{p.lower()}@depth20@100ms" if self.books else "") for p in self._pairs)
 
         async def subscribe(ws):
             self.note = f"streaming trades for {len(self._pairs)} pairs"
@@ -92,6 +92,12 @@ class BinanceSource(Source):
 
     def _handle(self, m: dict, emit) -> None:
         d = m.get("data") or {}
+        stream = str(m.get("stream") or "")
+        if "@depth" in stream and "bids" in d:                                   # a partial-book snapshot: the top 20 each side, every 100 ms
+            sym = self._pairs.get(stream.split("@")[0].upper())
+            if sym:
+                self._depth(sym, [(float(p), float(q)) for p, q in d.get("bids") or []], [(float(p), float(q)) for p, q in d.get("asks") or []], True)
+            return
         sym = self._pairs.get(d.get("s"))
         if not sym:
             return

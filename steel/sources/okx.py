@@ -80,7 +80,7 @@ class OKXSource(Source):
         self._insts = {self.inst(s): s for s in self.symbols}
 
         async def subscribe(ws):
-            args = [{"channel": ch, "instId": i} for i in self._insts for ch in ("trades", "tickers")]
+            args = [{"channel": ch, "instId": i} for i in self._insts for ch in (("trades", "tickers") + (("books",) if self.books else ()))]
             await ws.send(json.dumps({"op": "subscribe", "args": args}))
             self.note = f"streaming trades for {len(self._insts)} pairs"
 
@@ -92,6 +92,13 @@ class OKXSource(Source):
     def _handle(self, m: dict, emit) -> None:
         arg = m.get("arg") or {}
         ch = arg.get("channel")
+        if ch == "books":                                                        # 400 levels: a snapshot, then updates (size 0 removes)
+            for d in m.get("data") or []:
+                sym = self._insts.get(arg.get("instId"))
+                if sym:
+                    self._depth(sym, [(float(x[0]), float(x[1])) for x in d.get("bids") or []], [(float(x[0]), float(x[1])) for x in d.get("asks") or []],
+                                m.get("action") == "snapshot", int(d.get("ts") or 0) / 1000.0 or None)
+            return
         for d in m.get("data") or []:
             sym = self._insts.get(d.get("instId"))
             if not sym:

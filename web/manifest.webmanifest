@@ -1,0 +1,15 @@
+{
+  "name": "Steel",
+  "short_name": "Steel",
+  "description": "A self-hosted crypto market model: the desk's second opinion, around the clock.",
+  "start_url": "/#desk",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a0d12",
+  "theme_color": "#0a0d12",
+  "icons": [
+    { "src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

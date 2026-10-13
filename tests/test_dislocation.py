@@ -76,3 +76,19 @@ def test_manager_hands_every_live_venues_book_to_the_hook():
     m._route("kraken", Tick("BTC-USD", now, 100.0, 1.0, True))                                  # a trade without a book: nothing
     m._route("sim", Tick("BTC-USD", now, 60000.0, 1.0, True, 59990.0, 60010.0))                 # the simulator's quotes are fiction
     assert books == [("coinbase", "BTC-USD", 99.9, 100.1), ("binance", "BTC-USD", 99.95, 100.05)]
+
+
+def test_an_impossible_gap_is_a_wrong_quote_not_an_episode():
+    """A venue whose symbol names another coin (HTX on the first all-venue run) shows a bid
+    thousands of bps over everyone's ask; that is a suspect quote, never an episode."""
+    m = monitor(max_gap_bps=500.0)
+    t = 1_791_000_000.0
+    m.update("MON-USD", "binance", 1.000, 1.001, t, quote="USDT")
+    m.update("MON-USD", "bybit", 1.001, 1.002, t, quote="USDT")
+    assert m.update("MON-USD", "htx", 3.000, 3.010, t + 0.1, quote="USDT") is None              # 20,000 bps: refused
+    assert not m.open and m.suspect == {"htx": 1} and m.stats()["suspect"] == {"htx": 1} and m.stats()["max_gap_bps"] == 500.0
+    m.update("MON-USD", "htx", 1.004, 1.005, t + 0.2, quote="USDT")                             # a sane quote from the same venue: a real 20 bps gross gap
+    assert ("MON-USD", "USDT", "spot") in m.open and m.open[("MON-USD", "USDT", "spot")]["sell"] == "htx"
+    off = monitor(max_gap_bps=0.0)                                                              # 0 turns the gate off
+    off.update("X-USD", "a", 1.0, 1.01, t, quote="USDT"); off.update("X-USD", "b", 3.0, 3.01, t, quote="USDT")
+    assert off.open

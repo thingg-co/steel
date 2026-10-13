@@ -97,6 +97,12 @@ class Source:
         self.ticks = 0
         self.last_tick: float | None = None
         self.note: str | None = None
+        self.depth_sink = None                # set by the manager: (venue, pair, bids, asks, snapshot, ts) for every depth message
+        self.books = bool(getattr(cfg, "books", True))
+
+    def _depth(self, pair: str, bids, asks, snapshot: bool, ts: float | None = None, depth: int | None = None) -> None:
+        if self.depth_sink is not None:
+            self.depth_sink(self.id, pair, bids, asks, snapshot, ts, depth)
 
     def supports(self, sym: str) -> bool:
         return "-" in sym and sym not in self._unsupported

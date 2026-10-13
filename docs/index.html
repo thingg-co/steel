@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Steel — the market never closes; neither does the model</title>
+<meta name="description" content="Steel is a self-hosted crypto market model: it watches every venue around the clock, forecasts the next hour as a distribution, shows its work, pays every real cost in simulation, and never trades unless armed.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230a0d12'/%3E%3Ctext x='32' y='42' font-family='Arial Black,Arial' font-size='28' font-weight='900' fill='%236fb3ff' text-anchor='middle'%3ES%3C/text%3E%3Crect x='14' y='48' width='36' height='3' rx='1.5' fill='%23f2c14e'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="fonts/fonts.css">
+<style>
+/* Steel's public page: dark-first, the same tokens as the dashboard; the hero is the live tape. */
+:root {
+  --bg: #0a0d12; --surface: #11161e; --surface-2: #171d27; --line: rgba(238,242,246,.09); --line-2: rgba(238,242,246,.16);
+  --ink: rgba(238,242,246,.94); --ink-2: rgba(238,242,246,.74); --muted: rgba(238,242,246,.5);
+  --temper: #6fb3ff; --temper-ink: #0a0d12; --straw: #f2c14e; --up: #45d483; --down: #ff5c6a;
+  --display: "Archivo", "Helvetica Neue", Arial, sans-serif; --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --max: 1120px; color-scheme: dark;
+}
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
+  --bg: #f3f5f8; --surface: #ffffff; --surface-2: #e9edf3; --line: rgba(12,20,32,.1); --line-2: rgba(12,20,32,.2);
+  --ink: #0e141d; --ink-2: #2d3744; --muted: #66727f; --temper: #1f6fd6; --temper-ink: #ffffff; --straw: #a8780b; --up: #1b9a57; --down: #d23b4a; color-scheme: light; } }
+:root[data-theme="light"] {
+  --bg: #f3f5f8; --surface: #ffffff; --surface-2: #e9edf3; --line: rgba(12,20,32,.1); --line-2: rgba(12,20,32,.2);
+  --ink: #0e141d; --ink-2: #2d3744; --muted: #66727f; --temper: #1f6fd6; --temper-ink: #ffffff; --straw: #a8780b; --up: #1b9a57; --down: #d23b4a; color-scheme: light; }
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink-2); font-family: var(--display); font-size: 16.5px; line-height: 1.55; }
+a { color: var(--temper); text-decoration: none; } a:hover { text-decoration: underline; }
+.wrap { max-width: var(--max); margin: 0 auto; padding-inline: 20px; }
+h1, h2, h3 { color: var(--ink); margin: 0; text-wrap: balance; }
+h1 { font-size: clamp(36px, 6.2vw, 70px); font-weight: 800; font-variation-settings: "wdth" 86; font-stretch: 86%; letter-spacing: -.02em; line-height: 1.0; }
+h2 { font-size: clamp(26px, 3.6vw, 38px); font-weight: 700; font-variation-settings: "wdth" 92; font-stretch: 92%; letter-spacing: -.015em; margin-bottom: 14px; }
+h3 { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
+p { max-width: 66ch; margin: 0 0 14px; }
+code { font-family: var(--mono); font-size: .9em; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+pre { font-family: var(--mono); font-size: 13.5px; line-height: 1.5; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; overflow-x: auto; margin: 0 0 14px; color: var(--ink); }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums slashed-zero; }
+.eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--straw); margin-bottom: 14px; }
+
+/* header */
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; padding: 16px 20px; max-width: var(--max); margin: 0 auto; }
+.brand { display: inline-flex; flex-direction: column; gap: 4px; color: var(--ink); text-decoration: none; }
+.wordmark { font-weight: 800; font-variation-settings: "wdth" 80; font-stretch: 80%; letter-spacing: .14em; font-size: 20px; line-height: 1; }
+.temperline { display: block; height: 2px; width: 100%; border-radius: 1px; background: linear-gradient(90deg, #f2c14e 0%, #c76a3a 30%, #7a3f8f 55%, #3a5fbf 75%, #6fb3ff 100%); background-size: 200% 100%; animation: temper 7s linear infinite alternate; }
+@keyframes temper { to { background-position: 100% 0; } }
+@media (prefers-reduced-motion: reduce) { .temperline { animation: none; } }
+.top nav { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px 18px; font-family: var(--mono); font-size: 13px; } .top nav a { color: var(--ink-2); } .top nav a:hover { color: var(--ink); text-decoration: none; }
+@media (max-width: 640px) { .top nav a.hide-sm { display: none; } .top nav { gap: 8px 14px; } }
+.tgl { background: var(--surface); color: var(--ink); border: 1px solid var(--line-2); border-radius: 8px; padding: 4px 9px; font: inherit; cursor: pointer; }
+
+/* hero */
+.hero { padding: 36px 0 20px; }
+.hero .lede { font-size: 20px; color: var(--ink-2); max-width: 62ch; margin: 18px 0 22px; }
+.cta { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 24px; }
+.btn { display: inline-block; padding: 10px 16px; border-radius: 8px; font-weight: 600; border: 1px solid var(--line-2); color: var(--ink); } .btn:hover { text-decoration: none; border-color: var(--temper); }
+.btn.primary { background: var(--temper); color: var(--temper-ink); border-color: var(--temper); }
+.tape { position: relative; border: 1px solid var(--line-2); border-radius: 12px; background: var(--surface); overflow: hidden; }
+.tape canvas { display: block; width: 100%; height: 300px; }
+.tape .cap { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 8px 14px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.tape .cap b { color: var(--ink); font-weight: 500; }
+.tape .cap i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+.hero-note { font-family: var(--mono); font-size: 12.5px; color: var(--muted); margin-top: 12px; }
+
+/* sections */
+section { padding: 56px 0 0; }
+.band { background: var(--surface); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); margin-top: 56px; padding-bottom: 56px; }
+.grid { display: grid; gap: 16px; } .g2 { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); } .g3 { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); } .g4 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; min-width: 0; } .band .card { background: var(--bg); }
+.card p { font-size: 15.5px; margin-bottom: 8px; } .card .n { font-family: var(--mono); color: var(--straw); font-size: 12px; letter-spacing: .1em; }
+.routine { display: grid; gap: 28px; margin-top: 10px; }
+.step { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 20px; align-items: center; } .step:nth-child(even) { direction: rtl; } .step:nth-child(even) > * { direction: ltr; }
+@media (max-width: 860px) { .step, .step:nth-child(even) { grid-template-columns: 1fr; direction: ltr; } }
+.step img { width: 100%; max-width: 100%; border: 1px solid var(--line-2); border-radius: 10px; display: block; }
+.step .t { font-family: var(--mono); color: var(--straw); font-size: 12px; letter-spacing: .1em; margin-bottom: 8px; }
+.step p { font-size: 15.5px; } .step .from { font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; } .tw { overflow-x: auto; }
+th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; } th { color: var(--muted); font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; font-weight: 500; }
+td.y { color: var(--up); } td.n { color: var(--muted); } td.k { color: var(--ink); font-weight: 600; white-space: nowrap; }
+.foot { max-width: var(--max); margin: 56px auto 0; padding: 20px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 12.5px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 8px 20px; }
+.not { border-left: 3px solid var(--straw); padding: 10px 16px; background: var(--surface-2); border-radius: 0 8px 8px 0; margin: 8px 0; max-width: 72ch; }
+</style>
+<script>(function(){try{var t=localStorage.getItem("steel.theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t;}catch(e){}})();</script>
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#"><span class="wordmark">STEEL</span><span class="temperline"></span></a>
+  <nav><a href="#routine" class="hide-sm">The routine</a><a href="#work" class="hide-sm">It shows its work</a><a href="#beside" class="hide-sm">Beside the terminals</a><a href="#run">Run it</a><a href="whitepaper.html">Whitepaper</a><a href="https://github.com/thingg-co/steel">GitHub</a></nav>
+  <button class="tgl" id="theme" type="button" title="switch theme">☀</button>
+</header>
+
+<div class="hero"><div class="wrap">
+  <div class="eyebrow">self-hosted · continuously learning · never trades unless armed</div>
+  <h1>The market never closes.<br>Neither does the model.</h1>
+  <p class="lede">Steel is a crypto market model that runs on your own box. It listens to every venue's prints and books around the clock, forecasts each pair's next hour as a distribution, learns as those forecasts resolve, and pays every real cost when it trades on paper. Every map it draws says how it was made.</p>
+  <div class="cta"><a class="btn primary" href="#run">Run it</a><a class="btn" href="whitepaper.html">Read the whitepaper</a><a class="btn" href="https://github.com/thingg-co/steel">View on GitHub</a></div>
+  <div class="tape">
+    <canvas id="tape" width="1120" height="300"></canvas>
+    <div class="cap" id="tape-cap"><span><b>BTC-USD</b> · 34 seconds of real prints from six venues, 2026-10-13, replayed</span><span id="tape-venues"></span><span id="tape-stats"></span></div>
+  </div>
+  <div class="hero-note">Python · PyTorch · FastAPI · a no-build dashboard · a data API and an MCP server · a local LLM for the brief, never a cloud one</div>
+</div></div>
+
+<section id="routine"><div class="wrap">
+  <div class="eyebrow">07:00 UTC, and every hour after</div>
+  <h2>Built on what a desk looks at, in the order it looks.</h2>
+  <p>A crypto session is a routine run before the hour and repeated through the day: the clock, the funding sweep, open interest, the liquidation map, the flow, the levels, and who is positioned where. Steel's views follow that order, and the strip at the top of every view is the routine's numbers.</p>
+  <div class="routine">
+    <div class="step"><div><div class="t">THE DESK</div><h3>The strip, the screener, the calls.</h3><p>Regime, breadth, the funding median across pairs, open interest and liquidations on four perp venues, dislocations open, the next scheduled event, and whether the model is trusted. Under it, every pair by every stored series, as a table or a heatmap, and the model's live calls with their reasons.</p><p class="from">from /api/screener and /api/calendar, every 15 s</p></div><img src="img/desk.png" alt="The Desk view: the status strip, the screener table and the model's cards" loading="lazy"></div>
+    <div class="step"><div><div class="t">THE PAIR</div><h3>One chart, every venue's prints.</h3><p>Candles at any timeframe from the tape, the footprint, the volume profile, the book heatmap and the modeled liquidation map, net positioning, GEX, levels, your own indicators in Python, the model's calls and its forecast fan. The pair's tape, book, derivatives and options sit beside the chart; the order ticket docks with draggable rays.</p><p class="from">from /api/candles, /api/footprint, /api/book, /api/derivs, /api/options</p></div><img src="img/chart.png" alt="The Chart view with the pair rail" loading="lazy"></div>
+    <div class="step"><div><div class="t">THE LEVERAGE</div><h3>Where the positions are.</h3><p>Open interest and its change, funding and liquidations per pair across Binance, Bybit, OKX and Hyperliquid, Deribit's options surface with the smile and the term structure, Polymarket's crypto markets, and what the crowd overlay reads.</p><p class="from">from four perp feeds, Deribit and Polymarket, no keys</p></div><img src="img/flow.png" alt="The Flow view: leverage across the market and the options surface" loading="lazy"></div>
+    <div class="step"><div><div class="t">THE MODEL</div><h3>Trusted, or not, and why.</h3><p>A held-out scorecard, calibration by pair, the drift of every feature and the net's weight on it, the weekly walk-forward backtest and the policy sweep. The indicator editor lives here too: a file in Python, reloaded on save, drawn on the chart.</p><p class="from">from the replay and the scorecard; nothing here changes a forecast</p></div><img src="img/model.png" alt="The Model view with the indicator editor" loading="lazy"></div>
+  </div>
+</div></section>
+
+<section id="work" class="band"><div class="wrap">
+  <h2>It shows its work.</h2>
+  <p>Four rules, each a line in the code and a test in the suite.</p>
+  <div class="grid g4">
+    <div class="card"><div class="n">RULE 1</div><h3>Every map says how it was made</h3><p>The liquidation map is modeled from open-interest changes and leverage bands, never real positions, and it scores itself against the venues' real liquidations. The book heatmap says what rested, not what would fill.</p></div>
+    <div class="card"><div class="n">RULE 2</div><h3>Every simulated dollar pays</h3><p>The paper book pays the venue's taker fee, the half-spread, funding by side, impact, and the on-chain transfer's fee and wait when money has to move between venues. A short is an isolated-margin perp: the margin is the most it can lose.</p></div>
+    <div class="card"><div class="n">RULE 3</div><h3>Keys are read-only</h3><p>Balance readers go through one gate that refuses any path they did not declare, and the tests grep every path for order, withdrawal and transfer words. The vault seals every key at rest.</p></div>
+    <div class="card"><div class="n">RULE 4</div><h3>Nothing is sent unless armed</h3><p>Orders exist in one package behind a gate: execution off by default, a venue trades only when armed with its own trade key, every cap set, dry run on, and the kill switch refuses everything. Promotion from paper to live is the operator's, never the code's.</p></div>
+  </div>
+  <div class="not" style="margin-top:22px"><b>What it is not.</b> Not advice, not a signal service, not a hosted product. A research toy that runs on your box and is wrong often enough that it keeps a scorecard.</div>
+</div></section>
+
+<section id="beside"><div class="wrap">
+  <h2>Beside the terminals.</h2>
+  <p>The order-flow terminals (Market Monkey, Bookmap, TradingLite, aggr) and the derivatives dashboards (Coinglass, Velo, Laevitas) are good at what they show. Steel has most of the same views, and three things they do not.</p>
+  <div class="tw"><table>
+    <tr><th>What</th><th>The terminals</th><th>Steel</th></tr>
+    <tr><td class="k">Multi-venue tape, footprint, CVD by size band</td><td class="y">yes</td><td class="y">yes · six spot and perp venues, open source</td></tr>
+    <tr><td class="k">Book and liquidation heatmaps</td><td class="y">yes</td><td class="y">yes · labelled modeled or measured, scored against real liquidations</td></tr>
+    <tr><td class="k">Open interest, funding, liquidations, positioning</td><td class="y">yes</td><td class="y">yes · four perp venues, OI-confirmed net positioning</td></tr>
+    <tr><td class="k">Options surface</td><td class="y">some</td><td class="y">yes · GEX by strike, smile, term, max pain, zero gamma</td></tr>
+    <tr><td class="k">Scripting, workspaces, alerts, replay</td><td class="y">yes</td><td class="y">yes · Python indicators, widgets, series alerts, replay, a data API and an MCP server</td></tr>
+    <tr><td class="k">A forecast with its own scorecard</td><td class="n">no</td><td class="y">a distribution per pair per hour, trusted only by a held-out record</td></tr>
+    <tr><td class="k">A paper book that pays every cost</td><td class="n">no</td><td class="y">fees, spread, funding, impact, on-chain transfers and their waits</td></tr>
+    <tr><td class="k">Runs on your box, keys read-only, never trades unless armed</td><td class="n">hosted</td><td class="y">yes</td></tr>
+  </table></div>
+</div></section>
+
+<section id="run"><div class="wrap">
+  <h2>Run it.</h2>
+  <div class="grid g2">
+    <div><p>Python 3.11 or newer and <a href="https://docs.astral.sh/uv/">uv</a>. Market data needs no key; the optional exchange keys are pasted in on the Venues tab and should be read-only.</p>
+<pre>git clone git@github.com:thingg-co/steel.git
+cd steel
+uv sync
+uv run steel          # http://127.0.0.1:8100
+uv run steel token    # the operator token the dashboard asks for</pre>
+      <p>The first start pages 30 days of history from the spot venues and warms the net up before it forecasts. A GPU helps; a CPU runs the smaller presets.</p></div>
+    <div><p>For other programs, the same box serves a versioned data API and an MCP server: every store Steel keeps, reads only.</p>
+<pre>curl -H "Authorization: Bearer $TOKEN" \
+  localhost:8100/api/v1/candles/btc?tf=60&n=120
+
+uv run steel mcp      # Model Context Protocol on stdin/stdout</pre>
+      <p>Every route and shape is in <a href="https://github.com/thingg-co/steel/blob/main/docs/api.md">docs/api.md</a>; the design behind the dashboard is in the <a href="design/redesign-proposal.html">redesign proposal</a>; the system itself is in the <a href="whitepaper.html">whitepaper</a>.</p></div>
+  </div>
+</div></section>
+
+<footer class="foot"><span>Steel · © 2026 <a href="https://thingg.co">thingg.co</a> · PolyForm Noncommercial</span><span>a sibling of <a href="https://flint.thingg.co">Flint</a>, the same architecture pointed at equities</span><span>not advice</span></footer>
+
+<script>
+(function () {
+  const btn = document.getElementById("theme");
+  const paint = () => { btn.textContent = document.documentElement.dataset.theme === "light" || (!document.documentElement.dataset.theme && matchMedia("(prefers-color-scheme: light)").matches) ? "☾" : "☀"; };
+  btn.onclick = () => { const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"); const next = cur === "light" ? "dark" : "light"; document.documentElement.dataset.theme = next; try { localStorage.setItem("steel.theme", next); } catch (e) {} paint(); };
+  paint();
+})();
+// the hero: the bundled prints replayed as a scrolling tape with a running delta and the forecast fan ahead
+(async function () {
+  const cv = document.getElementById("tape"), ctx = cv.getContext("2d");
+  let data = null;
+  try { data = await (await fetch("data/tape-sample.json")).json(); } catch (e) { return; }
+  const prints = data.prints, venues = data.venues, span = prints[prints.length - 1][0];
+  const col = { binance: "#f2c14e", bybit: "#e06a9a", coinbase: "#6fb3ff", hyperliquid: "#45d483", kraken: "#a394ff", okx: "#5fd3e6" };
+  document.getElementById("tape-venues").innerHTML = venues.map(v => `<i style="background:${col[v] || '#888'}"></i>${v}`).join(" ");
+  const tok = () => getComputedStyle(document.documentElement);
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let t0 = performance.now(), window_s = 12;
+  function frame(now) {
+    const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = 300;
+    if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
+    const T = tok(), ink = T.getPropertyValue("--ink").trim(), muted = T.getPropertyValue("--muted").trim(), line = T.getPropertyValue("--line-2").trim(), up = T.getPropertyValue("--up").trim(), dn = T.getPropertyValue("--down").trim(), temper = T.getPropertyValue("--temper").trim();
+    const elapsed = reduce ? span : ((now - t0) / 1000) % (span + 2);
+    const tEnd = Math.min(elapsed, span), tStart = tEnd - window_s;
+    const vis = prints.filter(p => p[0] >= tStart && p[0] <= tEnd);
+    const padL = 10, padR = 86, plotW = W - padL - padR, padT = 16, padB = 48;
+    const xs = t => padL + (t - tStart) / window_s * plotW * 0.78;
+    const pxs = vis.length ? vis.map(p => p[1]) : [prints[0][1]], lo = Math.min(...pxs) - 8, hi = Math.max(...pxs) + 8;
+    const ys = v => padT + (hi - v) / (hi - lo || 1) * (H - padT - padB);
+    ctx.strokeStyle = line; ctx.lineWidth = 1; [0.25, 0.5, 0.75].forEach(f => { const y = padT + f * (H - padT - padB); ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL + plotW, y); ctx.stroke(); });
+    // the prints: dots sized by notional, buys above the mid line in green, sells in red; venue colour as the ring
+    let buy = 0, sell = 0, last = vis.length ? vis[vis.length - 1][1] : prints[0][1];
+    vis.forEach(p => { const usd = p[1] * p[2]; if (p[3] > 0) buy += usd; else if (p[3] < 0) sell += usd; const r = Math.max(1.5, Math.min(14, Math.sqrt(usd) / 9));
+      const x = xs(p[0]), y = ys(p[1]); ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = p[3] > 0 ? up : p[3] < 0 ? dn : muted; ctx.globalAlpha = .55; ctx.fill(); ctx.globalAlpha = 1; if (r > 4) { ctx.strokeStyle = col[p[4]] || muted; ctx.lineWidth = 1.2; ctx.stroke(); } });
+    // the last price line and the forecast fan ahead of it (the model's 1-hour view on that day: +12 bps median, a 10 to 90 band of 166 bps)
+    const x0 = xs(tEnd), y0 = ys(last), x1 = padL + plotW;
+    const f = [-103, -58, 12, 19, 62].map(b => last * Math.exp(b / 1e4));
+    ctx.fillStyle = "rgba(111,179,255,.14)"; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, ys(f[4])); ctx.lineTo(x1, ys(f[0])); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "rgba(111,179,255,.26)"; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, ys(f[3])); ctx.lineTo(x1, ys(f[1])); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = temper; ctx.setLineDash([4, 3]); ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, ys(f[2])); ctx.stroke(); ctx.setLineDash([]);
+    ctx.font = "12px JetBrains Mono, monospace"; ctx.fillStyle = ink; ctx.textAlign = "left";
+    ctx.fillText(last.toLocaleString(undefined, { maximumFractionDigits: 1 }), x1 + 6, y0 + 4); ctx.fillStyle = temper; ctx.fillText("+12 bps · 1 h", x1 + 6, ys(f[2]) - 10); ctx.fillStyle = muted; ctx.fillText("10–90 band", x1 + 6, ys(f[0]) + 14);
+    // the running delta bar at the bottom
+    const tot = buy + sell || 1, bw = plotW * 0.78; ctx.fillStyle = "rgba(69,212,131,.5)"; ctx.fillRect(padL, H - 30, bw * buy / tot, 8); ctx.fillStyle = "rgba(255,92,106,.5)"; ctx.fillRect(padL + bw * buy / tot, H - 30, bw * sell / tot, 8);
+    ctx.fillStyle = muted; ctx.textAlign = "left"; ctx.fillText(`delta ${buy - sell >= 0 ? "+" : "−"}$${Math.abs(buy - sell).toLocaleString(undefined, { maximumFractionDigits: 0 })} over ${window_s} s · ${vis.length} prints`, padL, H - 8);
+    ctx.textAlign = "right"; ctx.fillText(reduce ? "" : `${tEnd.toFixed(1)} s`, padL + bw, H - 8);
+    const st = document.getElementById("tape-stats"); if (st) st.textContent = `${prints.length} prints · $${(prints.reduce((s, p) => s + p[1] * p[2], 0) / 1e6).toFixed(2)}M traded in ${span.toFixed(0)} s`;
+    if (!reduce) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

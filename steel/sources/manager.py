@@ -16,7 +16,9 @@ from .sim import SimSource
 def enabled_by_default(cls, cfg) -> bool:
     """The out-of-the-box state of a venue: its `default_on`, minus `sources_off`; `sources_on`
     names an exact set instead (plus the simulator), or adds venues when written with a plus
-    (`+bitget,+hyperliquid`)."""
+    (`+bitget,+hyperliquid`). The simulator starts on as the fallback for a name no venue
+    serves; the operator may switch it off from the Venues tab, and that choice is remembered
+    with the others (state/sources.json)."""
     off = {s.strip() for s in str(getattr(cfg, "sources_off", "") or "").split(",") if s.strip()}
     on_list = [s.strip() for s in str(getattr(cfg, "sources_on", "") or "").split(",") if s.strip()]
     added = {s[1:] for s in on_list if s.startswith("+")}
@@ -34,8 +36,10 @@ class SourceManager:
     on the next start, so the panel's choices outlive a restart."""
 
     def __init__(self, cfg, symbols: list[str], on_tick, on_provider_change=None, trace=None, on_quote=None,
-                 state_path: str | Path | None = None, on_book=None):
+                 state_path: str | Path | None = None, on_book=None, on_trade=None, on_depth=None):
         self.cfg = cfg
+        self.on_trade = on_trade
+        self.on_depth = on_depth                            # every live venue's depth snapshot or delta (steel/book.py)                            # every real print from every live venue (the tape), active or standby
         self.symbols = symbols
         self.deep_venue: dict[str, str] = {}        # name -> the venue its deep history pages from
         self.on_tick = on_tick
@@ -53,7 +57,7 @@ class SourceManager:
             src = cls(cfg, symbols)
             self.sources[src.id] = src
             on = enabled_by_default(cls, cfg)
-            if src.id in saved and src.id != "sim":
+            if src.id in saved:                              # the operator's choice, the simulator's too
                 on = bool(saved[src.id])
             self.enabled[src.id] = on and bool(src.symbols)
         self.seen: dict[str, dict[str, float]] = {s: {} for s in symbols}   # sym -> source_id -> last ts
@@ -79,7 +83,7 @@ class SourceManager:
             return
         try:
             self.state_path.parent.mkdir(parents=True, exist_ok=True)
-            self.state_path.write_text(json.dumps({"enabled": {k: v for k, v in self.enabled.items() if k != "sim"}}, indent=1))
+            self.state_path.write_text(json.dumps({"enabled": dict(self.enabled)}, indent=1))
         except OSError:
             pass
 
@@ -142,6 +146,8 @@ class SourceManager:
         self.seen[sym][src_id] = time.time()
         if self.on_book and tick.bid and tick.ask and self.sources[src_id].mechanism != "simulated":
             self.on_book(src_id, tick)
+        if self.on_trade and not tick.quote and tick.size and self.sources[src_id].mechanism != "simulated":
+            self.on_trade(src_id, tick)
         active = self.provider_for(sym)
         if active != self.active.get(sym):
             prev = self.active.get(sym)
@@ -250,8 +256,13 @@ class SourceManager:
         out.sort(key=lambda t: t.ts)
         return out
 
+    def _depth(self, src_id: str, pair: str, bids, asks, snapshot: bool, ts, depth: int | None = None) -> None:
+        if self.on_depth and pair in self.seen and not self.fiction(src_id, pair):
+            self.on_depth(src_id, pair, bids, asks, snapshot, ts, getattr(self.sources.get(src_id), "quote", "USD"), depth)
+
     def start(self) -> None:
         for src in self.sources.values():
+            src.depth_sink = self._depth
             if self.enabled.get(src.id) and src.id not in self.tasks:
                 self.tasks[src.id] = asyncio.create_task(self._supervise(src))
 

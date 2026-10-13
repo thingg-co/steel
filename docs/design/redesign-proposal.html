@@ -1,0 +1,338 @@
+<title>Steel Redesign Proposal</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..125,400..800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: a dark-first editorial brief with a sticky section index; mockups are real HTML built from the proposed tokens, so the page is also the first test of the identity. */
+:root {
+  --bg: #0a0d12;            /* blue-black canvas: cold steel, not Flint's warm black */
+  --surface: #11161e;
+  --surface-2: #171d27;
+  --line: rgba(238,242,246,.09);
+  --line-2: rgba(238,242,246,.16);
+  --ink: rgba(238,242,246,.94);
+  --ink-2: rgba(238,242,246,.72);
+  --muted: rgba(238,242,246,.5);
+  --temper: #6fb3ff;        /* the accent: tempered-steel blue */
+  --temper-ink: #0a0d12;
+  --straw: #f2c14e;         /* heat: the straw temper colour, for what is active or hot */
+  --up: #45d483;
+  --down: #ff5c6a;
+  --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
+  --bg: #f3f5f8; --surface: #ffffff; --surface-2: #e9edf3; --line: rgba(12,20,32,.1); --line-2: rgba(12,20,32,.2);
+  --ink: #0e141d; --ink-2: #2d3744; --muted: #66727f; --temper: #1f6fd6; --temper-ink: #ffffff; --straw: #a8780b; --up: #1b9a57; --down: #d23b4a; color-scheme: light; } }
+:root[data-theme="light"] {
+  --bg: #f3f5f8; --surface: #ffffff; --surface-2: #e9edf3; --line: rgba(12,20,32,.1); --line-2: rgba(12,20,32,.2);
+  --ink: #0e141d; --ink-2: #2d3744; --muted: #66727f; --temper: #1f6fd6; --temper-ink: #ffffff; --straw: #a8780b; --up: #1b9a57; --down: #d23b4a; color-scheme: light; }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink-2); font-family: var(--display); font-size: 16px; line-height: 1.55; margin: 0; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-block: 0 80px; padding-inline: 20px; }
+h1, h2, h3 { color: var(--ink); font-family: var(--display); text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(34px, 6vw, 64px); font-weight: 800; font-variation-settings: "wdth" 88; letter-spacing: -.02em; line-height: 1.02; }
+h2 { font-size: clamp(24px, 3.4vw, 34px); font-weight: 700; font-variation-settings: "wdth" 92; letter-spacing: -.015em; margin-bottom: 14px; }
+h3 { font-size: 18px; font-weight: 600; margin-bottom: 8px; }
+p { max-width: 68ch; margin: 0 0 14px; }
+a { color: var(--temper); text-decoration: none; border-bottom: 1px solid transparent; } a:hover { border-bottom-color: var(--temper); }
+code, .mono { font-family: var(--mono); font-size: .92em; font-variant-numeric: tabular-nums slashed-zero; }
+.eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--straw); margin-bottom: 14px; }
+.lede { font-size: 19px; color: var(--ink-2); max-width: 62ch; }
+section { padding-block: 56px 0; border-top: 1px solid var(--line); margin-top: 56px; }
+section:first-of-type { border-top: 0; margin-top: 0; padding-top: 40px; }
+.grid { display: grid; gap: 16px; } .g2 { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); } .g3 { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; min-width: 0; }
+.card h3 { margin-bottom: 6px; } .card p { margin-bottom: 8px; font-size: 15px; }
+ul { padding-left: 20px; margin: 0 0 14px; } li { margin: 4px 0; max-width: 72ch; }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; } .tw { overflow-x: auto; margin: 10px 0 18px; }
+th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; } th { color: var(--muted); font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; font-weight: 500; }
+td.k { white-space: nowrap; color: var(--ink); font-weight: 600; }
+.src { font-size: 13.5px; color: var(--muted); } .src a { color: var(--ink-2); }
+
+/* the identity sheet */
+.wordmark { display: inline-block; font-family: var(--display); font-weight: 800; font-variation-settings: "wdth" 80; font-size: 72px; letter-spacing: .12em; color: var(--ink); line-height: 1; }
+.temperline { height: 3px; width: 100%; background: linear-gradient(90deg, #f2c14e 0%, #c76a3a 30%, #7a3f8f 55%, #3a5fbf 75%, #6fb3ff 100%); border-radius: 2px; margin-top: 10px; }
+.swatches { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 12px 0 18px; }
+.sw { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; } .sw i { display: block; height: 54px; } .sw b { display: block; font: 500 12px var(--mono); padding: 6px 8px; color: var(--ink); } .sw small { display: block; font: 11.5px var(--mono); color: var(--muted); padding: 0 8px 7px; }
+.type-sample { display: grid; gap: 10px; } .type-sample div { border-top: 1px solid var(--line); padding-top: 8px; }
+.type-sample .d { font-family: var(--display); font-weight: 700; font-size: 30px; font-variation-settings: "wdth" 88; color: var(--ink); letter-spacing: -.01em; }
+.type-sample .b { font-size: 16px; } .type-sample .m { font-family: var(--mono); color: var(--ink); font-size: 15px; }
+
+/* the mockups: a scaled terminal frame built from the tokens */
+.mock { background: var(--bg); border: 1px solid var(--line-2); border-radius: 10px; overflow: hidden; font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.mock .bar { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.mock .bar .wm { font-family: var(--display); font-weight: 800; letter-spacing: .12em; font-size: 13px; color: var(--ink); font-variation-settings: "wdth" 80; }
+.mock .bar .nav { display: flex; gap: 2px; margin-left: 10px; } .mock .bar .nav span { padding: 3px 9px; border-radius: 5px; color: var(--muted); } .mock .bar .nav span.on { background: var(--surface-2); color: var(--ink); }
+.mock .bar .st { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; } .mock .bar .st span { padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; }
+.mock .strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); border-bottom: 1px solid var(--line); }
+.mock .strip div { padding: 8px 10px; border-right: 1px solid var(--line); } .mock .strip small { display: block; color: var(--muted); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; } .mock .strip b { font-weight: 600; color: var(--ink); }
+.mock .body { display: grid; grid-template-columns: 1.5fr 1fr; } @media (max-width: 760px) { .mock .body { grid-template-columns: 1fr; } }
+.mock .pane { padding: 10px 12px; border-right: 1px solid var(--line); min-width: 0; } .mock .pane:last-child { border-right: 0; border-top: 1px solid var(--line); } @media (min-width: 761px) { .mock .pane:last-child { border-top: 0; } }
+.mock .ph { color: var(--muted); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 6px; display: flex; justify-content: space-between; }
+.heat { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; } .heat div { height: 30px; border-radius: 3px; padding: 3px 5px; color: var(--ink); font-size: 10px; overflow: hidden; white-space: nowrap; } .heat .w2 { grid-column: span 2; }
+.rows div { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); } .rows div:last-child { border-bottom: 0; }
+.up { color: var(--up); } .down { color: var(--down); } .hot { color: var(--straw); } .acc { color: var(--temper); }
+.chartmock { position: relative; height: 210px; background: linear-gradient(180deg, transparent 0 24%, rgba(111,179,255,.05) 24% 26%, transparent 26%), var(--surface); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.chartmock canvas { width: 100%; height: 100%; display: block; }
+.chartmock .lbl { position: absolute; left: 8px; top: 6px; font-size: 10px; color: var(--muted); max-width: 62%; }
+.ticket { border: 1px solid var(--line-2); border-radius: 6px; padding: 8px; margin-top: 8px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; font-size: 10.5px; } .ticket label { color: var(--muted); display: block; font-size: 9.5px; } .ticket b { color: var(--ink); font-weight: 500; }
+.ticket .btn { grid-column: 1 / -1; display: flex; gap: 6px; } .ticket .btn span { padding: 3px 8px; border: 1px solid var(--line-2); border-radius: 4px; } .ticket .btn span.p { background: var(--temper); color: var(--temper-ink); border-color: var(--temper); }
+.phone { max-width: 390px; margin: 0 auto; }
+.phone .heat { grid-template-columns: repeat(4, 1fr); }
+.plan { counter-reset: p; } .plan .step { display: grid; grid-template-columns: 54px 1fr; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); } .plan .step:last-child { border-bottom: 1px solid var(--line); }
+.plan .n { font-family: var(--mono); color: var(--straw); font-size: 13px; } .plan .step p { margin-bottom: 4px; font-size: 15px; }
+.dec { background: var(--surface-2); border-left: 3px solid var(--straw); padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 10px 0; } .dec b { color: var(--ink); }
+.toc { position: sticky; top: env(safe-area-inset-top, 0px); background: var(--bg); border-bottom: 1px solid var(--line); z-index: 3; }
+.toc div { display: flex; flex-wrap: wrap; gap: 4px 14px; max-width: 1120px; margin: 0 auto; padding: 10px 20px; font-family: var(--mono); font-size: 12px; } .toc a { color: var(--muted); } .toc a:hover { color: var(--ink); border-bottom-color: transparent; }
+@media (prefers-reduced-motion: no-preference) { .temperline { background-size: 200% 100%; animation: temper 9s linear infinite alternate; } @keyframes temper { to { background-position: 100% 0; } } }
+</style>
+
+<div class="toc"><div><a href="#thesis">Thesis</a><a href="#research">Research</a><a href="#identity">Identity</a><a href="#ia">Views</a><a href="#mockups">Mockups</a><a href="#public">Public page</a><a href="#paper">Whitepaper</a><a href="#plan">Plan</a><a href="#decide">Decisions</a></div></div>
+
+<div class="wrap">
+<section id="thesis">
+  <div class="eyebrow">Proposal · 2026-10-13 · for the operator to decide</div>
+  <h1>Steel, as a crypto desk would build it.</h1>
+  <p class="lede">The dashboard was laid out for stocks and then had a crypto terminal bolted on: seven views that grew by accretion, a light/dark toggle that now wraps, and no identity of its own. This is a proposal to reorganize it around what a crypto trader looks at and in what order, to give Steel a visual system that is not Flint's, and to add a public page and a whitepaper that read differently from Flint's.</p>
+  <div class="grid g3">
+    <div class="card"><h3>The thesis</h3><p>Steel is the desk's second opinion: it watches every venue around the clock, forecasts the next hour as a distribution, shows its work, pays every real cost in simulation, and never trades unless armed. The interface should be built on the trader's routine, not on where the code lives.</p></div>
+    <div class="card"><h3>What changes</h3><p>Views regrouped as Desk, Chart, Flow, Book, Model, Venues, Ops. A cold-steel identity with one accent and a heat scale taken from tempering colours. A public page that opens on the live tape. A whitepaper organised around measurement and cost honesty.</p></div>
+    <div class="card"><h3>What stays</h3><p>The engine, the API, the panels as widgets, the chart engine, the seven-key navigation. Nothing here changes a forecast or a fee; it changes where things sit and how they look.</p></div>
+  </div>
+</section>
+
+<section id="research">
+  <h2>What crypto traders watch, and what the terminals give them</h2>
+  <p>Independent material on what professionals prioritise is thin; most of what is published is vendor positioning. What does recur, across the educational guides and the quant desks' own daily notes, is a routine, run before the session and repeated through the day:</p>
+  <div class="tw"><table>
+    <tr><th>Step</th><th>What they read</th><th>Steel today</th><th>Proposal</th></tr>
+    <tr><td class="k">The clock</td><td>Scheduled events (FOMC, CPI, jobs, expiries); decide in advance whether to trade through them.</td><td>Next events panel, <code>event_hours</code> feature.</td><td>A countdown in the status strip on every view.</td></tr>
+    <tr><td class="k">Funding sweep</td><td>Funding across many pairs; extremes read as a fragility map, not a signal.</td><td>Per pair in the screener and the derivatives panel.</td><td>A market-wide funding and OI strip on Flow; the screener sorted by it in one click.</td></tr>
+    <tr><td class="k">Open interest</td><td>Whether price moved with OI rising (new positions) or falling (closing), by side.</td><td>Positioning pane, OI pane, 4-venue aggregate incl. Hyperliquid.</td><td>Lead with the OI-confirmed net positioning, not raw OI.</td></tr>
+    <tr><td class="k">Liquidation map</td><td>Where leverage would be force-closed; forced orders are market orders, so price overshoots clusters.</td><td>Modeled map with a calibration score against real liquidations.</td><td>Keep the honesty label everywhere the map appears; show the score beside it.</td></tr>
+    <tr><td class="k">CVD bias</td><td>Spot vs perp delta; a persistent imbalance has to rebalance.</td><td>Tape CVD by size band, spot/perp venue toggles.</td><td>Spot CVD and perp CVD as two lines by default, the divergence named.</td></tr>
+    <tr><td class="k">Levels</td><td>Day, week, month opens and the previous ranges; VWAP; the volume profile.</td><td>All present on the chart.</td><td>Unchanged.</td></tr>
+    <tr><td class="k">Positioning of others</td><td>Whale positions, the crowd (funding, F&amp;G, Reddit), the options dealers.</td><td>Crowd overlay, GEX, Polymarket.</td><td>One "who is positioned where" row on Desk.</td></tr>
+  </table></div>
+  <div class="grid g2">
+    <div class="card"><h3>The terminals</h3><p><b>Market Monkey</b>: footprint, book heatmap, TPO, CVD, liquidations, dockable widgets, saved layouts, scripting. <b>Coinglass</b>: the free liquidation heatmap and OI/funding tables, derivatives-first, little spot. <b>Velo</b>: derivatives charting with deep history and a clean chart. <b>Laevitas</b>: options-first, institutional. <b>Bookmap</b> and <b>TradingLite</b>: book heatmap on the chart with footprint clusters. <b>aggr.trade</b>: open-source multi-venue tape with audio and large-trade grouping.</p><p>None of them forecasts. None of them keeps a paper book that pays fees, funding and on-chain transfer waits. None of them says how its liquidation map was made or scores it against the real forced orders. That is the identity.</p></div>
+    <div class="card"><h3>The visual conventions</h3><p>Dark, number-first, hairline-separated dense panels, tabular figures so values do not shift as they update, green for longs and red for shorts always paired with a label, one accent for live data and primary actions. Hyperliquid's reading of this is a blue-shifted near-black canvas with a single mint accent and white text at stepped opacities. Light themes exist mainly for bright rooms and screenshots.</p><p>Steel follows the conventions and differs in the accent and the heat scale, which are its own.</p></div>
+  </div>
+  <p class="src">Sources: <a href="https://blofin.com/academy/education/trading/liquidation-heatmaps-order-flow">BloFin, liquidation heatmaps and order flow</a> · <a href="https://www.buildix.trade/blog/daily-orderflow-trading-routine-15-minute-checklist">a 15-minute order-flow routine</a> · <a href="https://userguide.cryptoquant.com/quickstart/5-minute-data-guide/3-key-market-metrics">CryptoQuant on funding and OI</a> · <a href="https://medium.com/@cryptocreddy/comprehensive-guide-to-crypto-futures-indicators-f88d7da0c1b5">a futures-indicator primer</a> · <a href="https://mmt.gg/features/">Market Monkey features</a> · <a href="https://coincodecap.com/market-monkey-review">a Market Monkey review</a> · <a href="https://www.buildix.trade/blog/coinglass-alternatives-open-interest-funding-rate-tools-2026">Coinglass alternatives (vendor)</a> · <a href="https://www.sharpe.ai/compare/sharpe-vs-velo">Velo (vendor comparison)</a> · <a href="https://www.sharpe.ai/compare/sharpe-vs-laevitas">Laevitas (vendor comparison)</a> · <a href="https://bookmap.com/features">Bookmap</a> · <a href="https://coincub.com/blog/best-tradingview-alternatives/">TradingLite and others</a> · <a href="https://www.github.com/Tucsky/aggr">aggr (GitHub)</a> · <a href="https://www.webdesignhot.com/api/design-md/hyperliquid.md">a reading of Hyperliquid's design system</a> · <a href="https://www.buildix.trade/blog/light-mode-crypto-charts-orderflow-dashboard">on light themes (vendor)</a>.</p>
+</section>
+
+<section id="identity">
+  <h2>Identity: cold steel, one accent, a heat scale</h2>
+  <p>Flint is warm: a warm black, fire orange, gold, a system sans. Steel is its cold sibling. The canvas is a blue-black; the accent is tempered-steel blue; and the one detail only this subject has is the tempering scale, the oxide colours steel takes as it heats (straw, bronze, purple, blue), which becomes the heat scale for every map and the pulse under the wordmark.</p>
+  <div class="grid g2">
+    <div class="card">
+      <div class="wordmark">STEEL</div><div class="temperline"></div>
+      <p style="margin-top:12px;font-size:14.5px">The wordmark is Archivo at its narrow width, wide-tracked. The temper line under it is the live-data pulse: it drifts while feeds tick and freezes on a stall. Tagline: <b>the market never closes; neither does the model.</b></p>
+      <div class="type-sample">
+        <div class="d">Archivo, narrow and heavy, for headings and the wordmark</div>
+        <div class="b">Archivo at normal width for everything read: panels, notes, the brief. It is a grotesk with a real width axis, so the display and the body are one family at two widths.</div>
+        <div class="m">JetBrains Mono, tabular, slashed zero: 83,831.06 · +12 bps · 0.0069 %</div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Tokens</h3>
+      <div class="swatches">
+        <div class="sw"><i style="background:#0a0d12"></i><b>canvas</b><small>#0a0d12</small></div>
+        <div class="sw"><i style="background:#11161e"></i><b>surface</b><small>#11161e</small></div>
+        <div class="sw"><i style="background:#171d27"></i><b>surface-2</b><small>#171d27</small></div>
+        <div class="sw"><i style="background:#6fb3ff"></i><b>temper</b><small>#6fb3ff · the accent</small></div>
+        <div class="sw"><i style="background:#f2c14e"></i><b>straw</b><small>#f2c14e · heat, alerts</small></div>
+        <div class="sw"><i style="background:#45d483"></i><b>up / long</b><small>#45d483</small></div>
+        <div class="sw"><i style="background:#ff5c6a"></i><b>down / short</b><small>#ff5c6a</small></div>
+        <div class="sw"><i style="background:linear-gradient(90deg,#f2c14e,#c76a3a,#7a3f8f,#3a5fbf,#6fb3ff)"></i><b>temper scale</b><small>hot → cold, the heatmaps</small></div>
+      </div>
+      <p style="font-size:14.5px">Text is white at 94, 72 and 50 percent; hairlines at 9 and 16 percent. Radii 6 on controls, 10 on panels. The light theme keeps the same roles on a cool grey ground (shown if your viewer is set to light). Green and red are semantic and never the accent. Modeled things carry a dashed outline and the word "modeled"; measured things carry a solid one.</p>
+      <p style="font-size:14.5px"><b>Voice.</b> Short sentences, the number first, the source named, no adjectives about the market. "Modeled" and "measured" are always said. It never says what to do.</p>
+    </div>
+  </div>
+</section>
+
+<section id="ia">
+  <h2>The views, regrouped by what a trader does</h2>
+  <p>Seven views stay (the keys 1 to 7 work the same), but they are renamed and regrouped so each one answers one question. Every panel remains a widget: drag, collapse, export.</p>
+  <div class="tw"><table>
+    <tr><th>Key</th><th>View</th><th>The question</th><th>What moves here</th></tr>
+    <tr><td class="mono">1</td><td class="k">Desk</td><td>What is the market doing right now, and what does Steel think?</td><td>The status strip (regime, breadth, funding, OI change, liquidations 1h, next event, dislocations open, trust), the screener heatmap, the model's live calls with their why, the alerts feed, dislocations, news and the brief. Replaces Market and the Names cards.</td></tr>
+    <tr><td class="mono">2</td><td class="k">Chart</td><td>What is happening in this pair?</td><td>The chart with a right rail: tape, book, derivatives, options for the pair; the docked ticket with its rays; replay. The pair detail folds into this view.</td></tr>
+    <tr><td class="mono">3</td><td class="k">Flow</td><td>Where is the leverage, and who is positioned where?</td><td>Market-wide OI, funding, liquidations and net positioning by pair; the liquidation maps with their calibration; the options surface; the prediction markets; the crowd. New: these are scattered across three views today.</td></tr>
+    <tr><td class="mono">4</td><td class="k">Book</td><td>What do I hold, what did it cost, what is in flight?</td><td>Paper and live positions, fills with their fees, funding paid, transfers and their waits, the exchange balances, the algorithm runs, exports.</td></tr>
+    <tr><td class="mono">5</td><td class="k">Model</td><td>Can the forecasts be trusted, and why?</td><td>The scorecard, calibration by pair, feature drift and net weight, the backtest and sweep, the universe, the indicator editor. Replaces Research.</td></tr>
+    <tr><td class="mono">6</td><td class="k">Venues</td><td>What is feeding, and with which keys?</td><td>Sources and their health, the simulator switch, the signal providers, keys and fee tiers, the probe.</td></tr>
+    <tr><td class="mono">7</td><td class="k">Ops</td><td>What is Steel allowed to do?</td><td>Controls, the execution gate and kill switch, series alerts, the GPU handoff, backups, the consoles.</td></tr>
+  </table></div>
+  <div class="grid g3">
+    <div class="card"><h3>The status strip</h3><p>One row on every view: the routine's numbers (next event in h, funding median, OI 1h, liquidations 1h by side, breadth, F&amp;G, dislocations open, trusted or not). It is the 15-minute checklist made permanent.</p></div>
+    <div class="card"><h3>The pair rail</h3><p>Tape, book, derivatives and options for the selected pair live beside the chart, not in a modal. Selecting a pair anywhere (screener, calls, book) moves the rail and the chart with it; the link is on by default.</p></div>
+    <div class="card"><h3>The phone</h3><p>Desk and the alerts work at phone width: the strip stacks, the heatmap goes four wide, the calls list is the page. The rest stays desktop.</p></div>
+  </div>
+</section>
+
+<section id="mockups">
+  <h2>Mockups</h2>
+  <p>Built from the tokens above, with numbers from the 2026-10-13 smoke run so the density is real. These are layout studies, not final pixels.</p>
+  <h3>Desk</h3>
+  <div class="mock">
+    <div class="bar"><span class="wm">STEEL</span><div class="nav"><span class="on">Desk</span><span>Chart</span><span>Flow</span><span>Book</span><span>Model</span><span>Venues</span><span>Ops</span></div>
+      <div class="st"><span>feed: 6 venues</span><span class="up">trusted</span><span>GPU shared</span><span class="hot">CPI in 28.9 h</span></div></div>
+    <div class="strip">
+      <div><small>regime</small><b class="down">risk-off</b></div><div><small>breadth</small><b>22 %</b></div><div><small>funding median</small><b>+0.0069 % / 8 h</b></div><div><small>OI · 4 venues</small><b>$18.2 B <span class="up">+0.3 %</span></b></div>
+      <div><small>liquidations 1 h</small><b><span class="down">$1.5 k</span> L · <span class="up">$0</span> S</b></div><div><small>fear &amp; greed</small><b>57</b></div><div><small>dislocations open</small><b>3</b></div><div><small>GEX BTC</small><b>+172 M / 1 %</b></div>
+    </div>
+    <div class="body">
+      <div class="pane"><div class="ph"><span>screener · colour by tape delta 1 h</span><span>96 pairs · table</span></div>
+        <div class="heat">
+          <div class="w2" style="background:rgba(69,212,131,.55)">BTC 83,831 <span class="up">+12</span></div><div class="w2" style="background:rgba(69,212,131,.5)">ETH 2,527 <span class="down">−10</span></div><div style="background:rgba(69,212,131,.45)">ZEC</div><div style="background:rgba(255,92,106,.35)">NEAR</div><div style="background:rgba(69,212,131,.35)">HYPE</div><div style="background:rgba(255,92,106,.25)">RLC</div>
+          <div style="background:rgba(69,212,131,.3)">PEPE</div><div style="background:rgba(69,212,131,.3)">UNI</div><div style="background:rgba(255,92,106,.2)">RAY</div><div style="background:rgba(69,212,131,.2)">XRP</div><div style="background:rgba(255,92,106,.3)">OGN</div><div style="background:rgba(69,212,131,.25)">CT</div><div style="background:rgba(255,92,106,.15)">BLUR</div><div style="background:rgba(69,212,131,.15)">SKL</div>
+          <div style="background:rgba(69,212,131,.2)">SOL</div><div style="background:rgba(255,92,106,.2)">SUI</div><div style="background:rgba(69,212,131,.1)">LINK</div><div style="background:rgba(255,92,106,.1)">TAO</div><div style="background:rgba(69,212,131,.2)">ONDO</div><div style="background:rgba(255,92,106,.15)">PENGU</div><div style="background:rgba(69,212,131,.1)">AAVE</div><div style="background:var(--surface-2);color:var(--muted)">+ 74</div>
+        </div>
+        <div class="ph" style="margin-top:12px"><span>dislocations · open</span><span>net of fees</span></div>
+        <div class="rows"><div><span>XRP-USD · kraken → binance</span><span class="acc">+6.1 bps</span><span>12 s</span></div><div><span>SOL-USD · okx → bybit</span><span class="acc">+4.4 bps</span><span>3 s</span></div><div><span>ZEC-USD · coinbase → kraken</span><span class="acc">+3.9 bps</span><span>41 s</span></div></div>
+      </div>
+      <div class="pane"><div class="ph"><span>the model's calls</span><span>1 h · P(up)</span></div>
+        <div class="rows"><div><span class="up">BUY SOL</span><span>+42 bps · 61 %</span><span>0.08</span></div><div><span class="down">SELL ETH</span><span>−38 bps · 36 %</span><span>0.06</span></div><div><span>HOLD BTC</span><span>+12 bps · 46 %</span><span>·</span></div><div><span class="hot">faded: TRUMP</span><span>crowded long</span><span>·</span></div></div>
+        <div class="ph" style="margin-top:12px"><span>alerts</span><span>last hour</span></div>
+        <div class="rows"><div><span>liquidation $250 k BTC longs on bybit</span><span class="down">07:51</span><span></span></div><div><span>rule: SOL funding above 0.01 %</span><span class="hot">07:40</span><span></span></div><div><span>trust: held-out hit 54 % on 212 calls</span><span class="up">07:00</span><span></span></div></div>
+        <div class="ph" style="margin-top:12px"><span>who is positioned where</span><span></span></div>
+        <div class="rows"><div><span>perp book net</span><span class="up">+$310 M longs opened 24 h</span><span></span></div><div><span>dealers (Deribit)</span><span>long gamma · pinned 80–88 k</span><span></span></div><div><span>crowd</span><span class="hot">leaning long · fade on</span><span></span></div></div>
+      </div>
+    </div>
+  </div>
+
+  <h3 style="margin-top:28px">Chart, with the pair rail and the docked ticket</h3>
+  <div class="mock">
+    <div class="bar"><span class="wm">STEEL</span><div class="nav"><span>Desk</span><span class="on">Chart</span><span>Flow</span><span>Book</span><span>Model</span><span>Venues</span><span>Ops</span></div>
+      <div class="st"><span class="acc">BTC-USD</span><span>5m</span><span>6 venues</span><span>layers 14</span><span>replay</span></div></div>
+    <div class="body">
+      <div class="pane"><div class="chartmock"><canvas id="cm"></canvas><div class="lbl">candles from 6 venues' prints · forecast fan +12 bps · 4h +9 · 1d +31 · liquidation map (modeled, 0 of 0 real liquidations scored)</div></div>
+        <div class="ticket"><div><label>side</label><b>HOLD · entry</b></div><div><label>limit</label><b>83,674.44</b></div><div><label>stop</label><b>—</b></div><div><label>target</label><b>—</b></div><div class="btn"><span class="p">show rays</span><span>copy</span><span>TWAP 6 × 1 min</span><span>send via gate · dry run</span></div></div>
+      </div>
+      <div class="pane"><div class="ph"><span>tape · 1 h</span><span>3,400 prints / min</span></div>
+        <div class="rows"><div><span>delta</span><span class="down">−2.53 M</span><span></span></div><div><span>$100 k+ prints</span><span>14 · <span class="up">9 buys</span></span><span></span></div><div><span>venue share</span><span>binance 41 · bybit 23 · hl 19</span><span></span></div></div>
+        <div class="ph" style="margin-top:10px"><span>book · USDT class</span><span>mid 83,696</span></div>
+        <div class="rows"><div><span>within 1 %</span><span>$13.7 M</span><span></span></div><div><span>imbalance 0.5 %</span><span class="down">−35 %</span><span></span></div></div>
+        <div class="ph" style="margin-top:10px"><span>derivatives · 4 venues</span><span>OI $18.2 B</span></div>
+        <div class="rows"><div><span>funding (OI-weighted)</span><span>+0.0069 % / 8 h</span><span></span></div><div><span>basis (perp − spot)</span><span>+2.1 bps</span><span></span></div><div><span>HIP-3 builder markets</span><span>159 on 10 dexes</span><span></span></div></div>
+        <div class="ph" style="margin-top:10px"><span>options · deribit</span><span>592 contracts</span></div>
+        <div class="rows"><div><span>zero gamma</span><span>88,000</span><span></span></div><div><span>max pain</span><span>80,000</span><span></span></div><div><span>walls</span><span>90 k · 95 k · 85 k</span><span></span></div></div>
+      </div>
+    </div>
+  </div>
+
+  <h3 style="margin-top:28px">Desk on a phone</h3>
+  <div class="mock phone">
+    <div class="bar"><span class="wm">STEEL</span><div class="st"><span class="up">trusted</span><span class="hot">CPI 28.9 h</span></div></div>
+    <div class="strip"><div><small>funding</small><b>+0.0069 %</b></div><div><small>OI 1 h</small><b class="up">+0.3 %</b></div><div><small>liq 1 h</small><b class="down">$1.5 k L</b></div></div>
+    <div class="pane" style="border-right:0"><div class="ph"><span>calls</span><span>1 h</span></div>
+      <div class="rows"><div><span class="up">BUY SOL</span><span>+42 bps</span><span>61 %</span></div><div><span class="down">SELL ETH</span><span>−38 bps</span><span>36 %</span></div><div><span>HOLD BTC</span><span>+12 bps</span><span>46 %</span></div></div>
+      <div class="ph" style="margin-top:10px"><span>screener</span><span>delta 1 h</span></div>
+      <div class="heat"><div style="background:rgba(69,212,131,.55)">BTC</div><div style="background:rgba(69,212,131,.5)">ETH</div><div style="background:rgba(69,212,131,.45)">ZEC</div><div style="background:rgba(255,92,106,.35)">NEAR</div><div style="background:rgba(69,212,131,.35)">HYPE</div><div style="background:rgba(255,92,106,.25)">RLC</div><div style="background:rgba(69,212,131,.3)">PEPE</div><div style="background:var(--surface-2);color:var(--muted)">+ 89</div></div>
+    </div>
+  </div>
+</section>
+
+<section id="public">
+  <h2>The public page</h2>
+  <p>Flint's page explains: what it does, how it works, run it. Steel's should show: it opens on the market itself, and the sections follow the trader's day. Hosted like Flint's, from <code>docs/</code> on GitHub Pages, at <code>steel.thingg.co</code> (a CNAME beside Flint's <code>flint.thingg.co</code>).</p>
+  <div class="grid g2">
+    <div class="card"><h3>Structure</h3>
+      <ul>
+        <li><b>Hero.</b> The wordmark, the temper line, and under it a live-looking tape: a canvas replaying a bundled minute of real prints from six venues, with the forecast fan drawn ahead. Headline: <i>The market never closes. Neither does the model.</i> Two buttons: run it, read the paper.</li>
+        <li><b>07:00 UTC.</b> The routine as sections: the clock, the funding sweep, open interest, the liquidation map, CVD, the levels, who is positioned where. Each with one real screenshot and one sentence on where the number comes from.</li>
+        <li><b>It shows its work.</b> Four claims, each a rule in the code: every map says how it was made; every simulated dollar pays real fees, funding and transfer waits; keys are read-only; nothing is sent unless armed, and the kill switch refuses everything.</li>
+        <li><b>What it is not.</b> Not advice, not a signal service, not a hosted product. A research toy that runs on your box.</li>
+        <li><b>Beside the terminals.</b> A short table: footprint, heatmaps, scripting, alerts, API, MCP, and the three things only Steel has.</li>
+        <li><b>Run it.</b> The uv commands, the Spark service, the token, the data API, the MCP server.</li>
+      </ul></div>
+    <div class="card"><h3>How it differs from Flint's</h3>
+      <ul>
+        <li>Flint leads with a screenshot; Steel leads with motion (the tape) because the subject is a market that never stops.</li>
+        <li>Flint's sections are about the system; Steel's are about the trader's hours.</li>
+        <li>Flint is warm and explanatory; Steel is cold and declarative: numbers first, every claim with its source.</li>
+        <li>Flint has one page and a paper; Steel adds a live status strip at the top of the page fed by a small JSON the box publishes (optional, off by default), so the page can show "trusted since", "venues feeding", "last backtest" without exposing the dashboard.</li>
+      </ul></div>
+  </div>
+</section>
+
+<section id="paper">
+  <h2>The whitepaper</h2>
+  <p>Steel's current paper mirrors Flint's outline (problem, data, model, learning, calibration, policy, pricing, evaluation, system). The proposal is to reorganise it around the two things that make Steel different: it measures a market that never closes from many venues at once, and it refuses to pretend. The outline:</p>
+  <div class="grid g2">
+    <div class="card">
+      <ol style="padding-left:20px;margin:0">
+        <li><b>A market that never closes.</b> What changes: no session, no overnight gap, a UTC day that is only a bookkeeping line, a stall that is always an alarm.</li>
+        <li><b>Measuring the market.</b> The tape (every print from every venue), the books (one dollar class at a time), the derivatives feeds (OI, funding, liquidations, four venues), the options surface, the calendar, the prediction markets. What is measured and what is modeled.</li>
+        <li><b>From measurement to features.</b> The 40 columns; the horizon axis; why a feature-set change resets the net and keeps the replay.</li>
+        <li><b>Learning around the clock.</b> Warmup, the held-out guard, the idle trainer, the weekly backtest in the thinnest tape, the GPU shared with Flint.</li>
+        <li><b>Trust.</b> The held-out scorecard, the live labels, calibration by pair, what "trusted" means and when it is withdrawn.</li>
+        <li><b>Every cost is real.</b> Venue fee profiles, funding by side, the half-spread, impact and Amihud, on-chain transfers with their fees and waits, bounded risk by construction (the isolated-margin short).</li>
+        <li><b>Cross-venue structure.</b> Dislocations and their windows, identity, the impossible-gap rule, the arbitrage replay by latency rung.</li>
+        <li><b>Honest maps.</b> The modeled liquidation map and its calibration against the venues' real forced orders; the book heatmap's method.</li>
+        <li><b>From paper to live.</b> The promotion checklist, the gate, the algorithms, the dead-man rule, the kill switch.</li>
+        <li><b>Evaluation.</b> The backtest's totals and the first paper weeks, reported with their caveats.</li>
+        <li><b>Limitations.</b> Vendor data, survivorship in the universe, the simulator's history, what the net cannot see.</li>
+        <li><b>Future work.</b> Pairs as a conversion graph (K20), real exogenous history, the model's own features.</li>
+      </ol>
+    </div>
+    <div class="card"><h3>Different from Flint's in kind</h3>
+      <ul>
+        <li>Each section opens with a measurement from a real run and its date (the dislocation day, the four-venue OI, the calibration score once there are liquidations to score). Flint's paper argues from design; Steel's argues from the log.</li>
+        <li>A "modeled / measured" margin tag on every figure and table.</li>
+        <li>The same type and tokens as the dashboard and the public page, so the three read as one product.</li>
+        <li>An appendix of every API route, every feature column and every setting, generated from the code at build time so it cannot drift.</li>
+      </ul></div>
+  </div>
+</section>
+
+<section id="plan">
+  <h2>Plan</h2>
+  <div class="plan">
+    <div class="step"><div class="n">1 · identity</div><div><p><b>Tokens, type, wordmark, the temper line; the header fixed.</b> The dashboard's palette and fonts move to the new tokens (one stylesheet change; every panel inherits), the theme toggle and the Layout menu stop wrapping, the wordmark and the pulse land in the header. About a day. Visible at once on the smoke instance.</p></div></div>
+    <div class="step"><div class="n">2 · public page</div><div><p><b>docs/index.html with the live-tape hero, the routine sections, the honesty section and the run-it section</b>, plus the CNAME and the Pages workflow. Screenshots rendered from the restyled dashboard. One to two days.</p></div></div>
+    <div class="step"><div class="n">3 · views</div><div><p><b>Desk, Chart with the rail, Flow, Model.</b> Panels move between views (they are widgets already), the status strip becomes global, the pair detail folds into Chart, the derivatives panels gather on Flow. Old hashes keep working through the legacy map. Two to three days.</p></div></div>
+    <div class="step"><div class="n">4 · whitepaper</div><div><p><b>The restructured paper</b> with run data in every section and the generated appendix. One to two days, after the views settle so the screenshots are final.</p></div></div>
+    <div class="step"><div class="n">5 · phone</div><div><p><b>Desk and alerts at phone width</b>, a web-app manifest, and the sound and notification toggles that make a phone useful. One day.</p></div></div>
+  </div>
+</section>
+
+<section id="decide">
+  <h2>Decisions needed before building</h2>
+  <div class="dec"><b>The accent.</b> Tempered blue as proposed, or something further from the crowd (the straw as the accent and blue as heat would invert the scale and read warmer).</div>
+  <div class="dec"><b>The names.</b> Desk / Chart / Flow / Book / Model / Venues / Ops, or keep Market and Research as names people already know.</div>
+  <div class="dec"><b>The domain.</b> steel.thingg.co beside flint.thingg.co, and whether the page's optional live strip (a small JSON the box publishes) is wanted at all.</div>
+  <div class="dec"><b>The order.</b> Identity first (fast, visible, no behaviour change) and the public page second, then the views; or views first so the public page's screenshots show the final layout.</div>
+  <p style="margin-top:18px">Answer these four and the build starts with the identity on the running smoke instance, so each step can be checked in a browser as it lands.</p>
+</section>
+</div>
+
+<script>
+(function () {
+  var cv = document.getElementById("cm"); if (!cv) return;
+  function draw() {
+    var r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1; if (!r.width) return;
+    cv.width = r.width * dpr; cv.height = r.height * dpr; var ctx = cv.getContext("2d"); ctx.scale(dpr, dpr);
+    var W = r.width, H = r.height, n = 64, px = 82400, up = getComputedStyle(document.documentElement).getPropertyValue("--up").trim() || "#45d483", dn = getComputedStyle(document.documentElement).getPropertyValue("--down").trim() || "#ff5c6a";
+    var cs = [], seed = 7; function rnd() { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; }
+    for (var i = 0; i < n; i++) { var o = px, c = px + (rnd() - 0.42) * 260; var h = Math.max(o, c) + rnd() * 90, l = Math.min(o, c) - rnd() * 90; cs.push([o, h, l, c]); px = c; }
+    var lo = Math.min.apply(null, cs.map(function (c) { return c[2]; })), hi = Math.max.apply(null, cs.map(function (c) { return c[1]; }));
+    var padR = 64, plotW = W - padR - 10, cw = plotW / (n + 12);
+    var y = function (v) { return 28 + (hi - v) / (hi - lo) * (H - 70); };
+    ctx.strokeStyle = "rgba(238,242,246,.06)"; for (var g = 0; g < 5; g++) { var yy = 28 + g * (H - 70) / 4; ctx.beginPath(); ctx.moveTo(10, yy); ctx.lineTo(10 + plotW, yy); ctx.stroke(); }
+    // the liquidation map as a modeled dashed band below
+    ctx.setLineDash([3, 3]); ctx.strokeStyle = "rgba(242,193,78,.6)"; ctx.strokeRect(10, y(lo + (hi - lo) * 0.18) - 6, plotW * 0.9, 12); ctx.setLineDash([]);
+    cs.forEach(function (c, i) { var x = 10 + i * cw + cw / 2; ctx.strokeStyle = ctx.fillStyle = c[3] >= c[0] ? up : dn; ctx.beginPath(); ctx.moveTo(x, y(c[1])); ctx.lineTo(x, y(c[2])); ctx.stroke(); ctx.fillRect(x - cw * 0.3, y(Math.max(c[0], c[3])), cw * 0.6, Math.max(1, Math.abs(y(c[0]) - y(c[3])))); });
+    var last = cs[n - 1][3], x0 = 10 + n * cw, x1 = 10 + (n + 11) * cw, f = [last * 0.9935, last * 0.998, last * 1.0012, last * 1.004, last * 1.0088];
+    ctx.fillStyle = "rgba(111,179,255,.14)"; ctx.beginPath(); ctx.moveTo(x0, y(last)); ctx.lineTo(x1, y(f[4])); ctx.lineTo(x1, y(f[0])); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "rgba(111,179,255,.26)"; ctx.beginPath(); ctx.moveTo(x0, y(last)); ctx.lineTo(x1, y(f[3])); ctx.lineTo(x1, y(f[1])); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "#6fb3ff"; ctx.setLineDash([4, 3]); ctx.beginPath(); ctx.moveTo(x0, y(last)); ctx.lineTo(x1, y(f[2])); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = "rgba(238,242,246,.6)"; ctx.font = "10px JetBrains Mono, monospace"; ctx.textAlign = "left";
+    ctx.fillText(hi.toFixed(0), 14 + plotW, H - 58); ctx.fillText(lo.toFixed(0), 14 + plotW, H - 44); ctx.fillText("+12 bps", 14 + plotW, Math.max(y(f[2]) + 3, 44));
+  }
+  draw(); window.addEventListener("resize", draw);
+})();
+</script>

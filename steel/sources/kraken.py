@@ -131,6 +131,8 @@ class KrakenSource(Source):
             for k in range(0, len(names), 50):
                 await ws.send(json.dumps({"method": "subscribe", "params": {"channel": "trade", "symbol": names[k:k + 50], "snapshot": False}}))
                 await ws.send(json.dumps({"method": "subscribe", "params": {"channel": "ticker", "symbol": names[k:k + 50]}}))
+                if self.books:
+                    await ws.send(json.dumps({"method": "subscribe", "params": {"channel": "book", "symbol": names[k:k + 50], "depth": 25}}))
             self.note = f"streaming trades for {len(names)} pairs"
 
         await self._ws_loop(emit, self.WS, subscribe, self._handle)
@@ -152,5 +154,12 @@ class KrakenSource(Source):
                     bid, ask = d.get("bid"), d.get("ask")
                     self._emit(emit, Tick(sym, time.time(), px, 0.0, None,
                                           float(bid) if bid else None, float(ask) if ask else None, quote=True))
+        elif ch == "book":                                                       # a snapshot of 25 levels, then updates (qty 0 removes)
+            for d in m.get("data") or []:
+                sym = self._wsn.get(d.get("symbol"))
+                if sym:
+                    self._depth(sym, [(float(x["price"]), float(x["qty"])) for x in d.get("bids") or []],
+                                [(float(x["price"]), float(x["qty"])) for x in d.get("asks") or []], m.get("type") == "snapshot",
+                                _iso_ts(d["timestamp"]) if d.get("timestamp") else None, depth=25)   # Kraken keeps 25 and never deletes beyond them
         elif m.get("error"):
             self.note = f"ws: {str(m['error'])[:80]}"
